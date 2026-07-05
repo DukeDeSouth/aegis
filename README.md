@@ -41,7 +41,8 @@ Aegis закрывает оба пробела:
 | [`docs/MVP_SCOPE.md`](docs/MVP_SCOPE.md) | Что входит в первую версию, что нет |
 | [`docs/GLOSSARY.md`](docs/GLOSSARY.md) | Термины |
 | [`docs/adr/`](docs/adr/) | Architecture Decision Records |
-| [`ROADMAP.md`](ROADMAP.md) | Этапы разработки |
+| [`ROADMAP.md`](ROADMAP.md) | Этапы разработки (фазы) |
+| [`docs/SPRINTS.md`](docs/SPRINTS.md) | Спринт-план: фазы, разложенные на 2-недельные спринты |
 
 ## Лицензия
 
