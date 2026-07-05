@@ -1,0 +1,31 @@
+# Secrets — никогда не коммитить
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+secrets/
+
+# Локальное состояние агента
+/data/
+*.db
+*.sqlite
+*.sqlite3
+snapshots/
+audit/*.log
+
+# Зависимости / сборка (заготовка на будущее)
+node_modules/
+dist/
+build/
+target/
+__pycache__/
+*.pyc
+.venv/
+
+# ОС / редакторы
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
