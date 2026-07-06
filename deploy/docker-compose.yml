@@ -1,0 +1,45 @@
+# Развёртывание Aegis (docs/REPO_LAYOUT.md).
+# host — ядро (Sprint 1-2), broker — credential broker (Sprint 3, ADR-0004).
+#
+# Сетевые инварианты (тест V3):
+#   aegis-internal (internal: true) — deny-all egress: нет маршрута наружу.
+#     Участники: broker и эфемерные sandbox-контейнеры (создаёт DockerSandboxRunner).
+#     Не добавляйте сюда другие сервисы — Docker-DNS резолвит всех членов сети.
+#   aegis-egress — обычная bridge-сеть; наружу ходит только broker.
+services:
+  host:
+    build: ..
+    restart: unless-stopped
+    volumes:
+      - aegis-data:/data
+    environment:
+      # Секреты ядра приходят через key_ref (src/config/schema.ts): в конфиге
+      # только имена переменных, значения — здесь. Сырых ключей LLM у ядра нет —
+      # трафик навыков пойдёт через broker (Sprint 8).
+      AEGIS_TG_BOT_TOKEN: ${AEGIS_TG_BOT_TOKEN}
+      AEGIS_TG_PAIRING_CODE: ${AEGIS_TG_PAIRING_CODE}
+
+  broker:
+    # Пин по digest (envoy v1.37.1); >= v1.36 обязательно (deploy/broker/README.md).
+    image: envoyproxy/envoy:v1.37.1@sha256:29496a88fba9c4c9cdef4afe8fec70f536c5ba111b1c2bddbc5436b091ceca33
+    restart: unless-stopped
+    command: ['envoy', '-c', '/etc/broker/envoy.yaml']
+    networks: [aegis-internal, aegis-egress]
+    volumes:
+      - ./broker/envoy.yaml:/etc/broker/envoy.yaml:ro
+      - ./broker/secret.yaml:/etc/broker/secret.yaml:ro
+      # Сырой секрет монтируется ТОЛЬКО брокеру (тест V2).
+      - ${AEGIS_BROKER_SECRET_FILE}:/etc/broker/token.txt:ro
+
+  # Пример локального LLM-провайдера (ADR-0008): опционально
+  # ollama:
+  #   image: ollama/ollama
+  #   volumes: [ollama:/root/.ollama]
+
+networks:
+  aegis-internal:
+    internal: true
+  aegis-egress: {}
+
+volumes:
+  aegis-data:

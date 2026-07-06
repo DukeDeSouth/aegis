@@ -1,0 +1,77 @@
+# Credential Broker — Envoy с фильтром credential_injector (ADR-0004, Sprint 3).
+#
+# Инварианты (проверяются test/security/v2-secret-exfiltration.test.ts на
+# идентичной структуре фильтра и `envoy --mode validate` на этом файле):
+#   - секрет живёт ТОЛЬКО в файле /etc/broker/token.txt, смонтированном брокеру;
+#     ядро и sandbox значения не видят;
+#   - allowlist хостов = virtual_hosts ниже; неизвестный Host → 404 (fail-closed);
+#   - нет секрета/ошибка инжекции → 401 (allow_request_without_credential: false);
+#   - sandbox говорит с брокером plain HTTP внутри internal-сети, наружу брокер
+#     ходит сам по TLS (transport_socket на кластере) — MITM-CA не нужен.
+#
+# Добавление хоста: новый virtual_host + cluster по образцу, затем
+#   docker run --rm -v $PWD:/etc/broker:ro envoyproxy/envoy:<pin> envoy --mode validate -c /etc/broker/envoy.yaml
+# Требуется Envoy >= v1.36 (header_value_prefix у Generic credential).
+
+node:
+  id: aegis-broker
+  cluster: aegis
+
+static_resources:
+  listeners:
+    - name: broker
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 8080 }
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                '@type': type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: broker
+                route_config:
+                  name: allowlist
+                  virtual_hosts:
+                    # Пример: LLM-провайдер. Замените домен на своего провайдера.
+                    - name: llm
+                      domains: ['api.openai.com', 'api.openai.com:*']
+                      routes:
+                        - match: { prefix: '/' }
+                          route:
+                            cluster: llm
+                            host_rewrite_literal: api.openai.com
+                  # Ничего не совпало → 404: маршрута нет по построению.
+                http_filters:
+                  - name: envoy.filters.http.credential_injector
+                    typed_config:
+                      '@type': type.googleapis.com/envoy.extensions.filters.http.credential_injector.v3.CredentialInjector
+                      allow_request_without_credential: false
+                      credential:
+                        name: envoy.http.injected_credentials.generic
+                        typed_config:
+                          '@type': type.googleapis.com/envoy.extensions.http.injected_credentials.generic.v3.Generic
+                          header_value_prefix: 'Bearer '
+                          credential:
+                            name: broker_token
+                            sds_config:
+                              path_config_source:
+                                path: /etc/broker/secret.yaml
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      '@type': type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+  clusters:
+    - name: llm
+      type: STRICT_DNS
+      # Брокер сам устанавливает TLS к апстриму: sandbox не делает https и не
+      # нуждается в CA — секрет и TLS-граница остаются на стороне брокера.
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          '@type': type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          sni: api.openai.com
+      load_assignment:
+        cluster_name: llm
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address: { address: api.openai.com, port_value: 443 }

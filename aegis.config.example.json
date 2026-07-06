@@ -1,0 +1,40 @@
+{
+  "data_dir": "./data",
+  "skills_dir": "./skills",
+  "budget": {
+    "daily_token_limit": 100000,
+    "reserve_for_owner": 20000,
+    "notify_session_id": "tg:YOUR_CHAT_ID"
+  },
+  "schedules": [
+    {
+      "id": "morning-digest",
+      "cron": "07:00",
+      "text": "/search inbox",
+      "session_id": "scheduler:morning-digest"
+    }
+  ],
+  "learning": {
+    "self_improvement_llm_enabled": false,
+    "min_reuse_rate": 0
+  },
+  "llm": {
+    "p_llm": {
+      "base_url": "http://localhost:11434/v1",
+      "model": "qwen3:14b",
+      "key_ref": "AEGIS_P_LLM_KEY",
+      "max_tokens": 4096
+    },
+    "q_llm": {
+      "base_url": "http://localhost:11434/v1",
+      "model": "qwen3:14b",
+      "key_ref": "AEGIS_Q_LLM_KEY",
+      "max_tokens": 2048
+    }
+  },
+  "telegram": {
+    "bot_token_ref": "AEGIS_TG_BOT_TOKEN",
+    "pairing_code_ref": "AEGIS_TG_PAIRING_CODE",
+    "poll_timeout_s": 30
+  }
+}

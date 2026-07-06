@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "name": "echo-procedure",
+  "version": "0.1.0",
+  "needs": [],
+  "network": "none",
+  "action_class": "read-only",
+  "code": false,
+  "entrypoints": []
+}

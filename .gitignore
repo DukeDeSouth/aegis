@@ -8,6 +8,7 @@ secrets/
 
 # Локальное состояние агента
 /data/
+aegis.config.json
 *.db
 *.sqlite
 *.sqlite3

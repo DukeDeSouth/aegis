@@ -1,0 +1,24 @@
+# Заготовка systemd-юнита для native host (Sprint 10).
+# Запуск: node src/host/main.ts (Node >= 24, нативный type stripping).
+[Unit]
+Description=Aegis personal agent host
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aegis
+Group=aegis
+WorkingDirectory=/opt/aegis
+EnvironmentFile=-/etc/aegis/env
+Environment=AEGIS_CONFIG=/opt/aegis/aegis.config.json
+ExecStart=/usr/bin/node /opt/aegis/src/host/main.ts
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/aegis
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,26 @@
+name: ci
+
+on: [push, pull_request]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      # Supply-chain политика (ADR-0006): install-скрипты запрещены,
+      # better-sqlite3 — единственное разрешённое исключение.
+      - run: npm ci --ignore-scripts
+      - run: npm rebuild better-sqlite3
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm test
+      # Security-контур V2/V3 (THREAT_MODEL): границы sandbox/broker на реальном
+      # Docker. Без Docker сьюты скипаются — на ubuntu-latest он есть всегда.
+      - run: npm run test:security
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm run loc
