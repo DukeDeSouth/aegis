@@ -3,7 +3,7 @@
  * Без Docker сьюты скипаются (describe.skipIf), а не падают и не зеленеют молча.
  */
 import { execFile } from 'node:child_process';
-import { mkdtempSync, realpathSync } from 'node:fs';
+import { chmodSync, mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -46,9 +46,13 @@ export async function dockerAvailable(): Promise<boolean> {
 /**
  * Каталог для mounts: realpath обязателен — на macOS tmpdir лежит за симлинком
  * /var → /private/var, а Docker Desktop шарит только реальный путь.
+ * chmod 0755 обязателен для нативного Linux (CI): mkdtemp даёт 0700, а контейнеры
+ * читают mount под непривилегированным uid (65534 / envoy) — иначе exit 2.
  */
 export function mountableTmpDir(prefix: string): string {
-  return mkdtempSync(join(realpathSync(tmpdir()), prefix));
+  const dir = mkdtempSync(join(realpathSync(tmpdir()), prefix));
+  chmodSync(dir, 0o755);
+  return dir;
 }
 
 /** Снос контейнеров и сетей по префиксу: и до (следы упавших прогонов), и после. */
