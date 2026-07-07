@@ -19,6 +19,7 @@ jobs:
       - run: npm run format:check
       - run: npm run typecheck
       - run: npm test
+      - run: npm run dashboard:test
       # Security-контур V2/V3 (THREAT_MODEL): границы sandbox/broker на реальном
       # Docker. Без Docker сьюты скипаются — на ubuntu-latest он есть всегда.
       - run: npm run test:security

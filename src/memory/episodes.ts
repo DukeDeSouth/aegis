@@ -99,6 +99,18 @@ export class EpisodeStore {
       .all(sessionId, limit) as RawEpisode[];
     return rows.map(toRow);
   }
+
+  /** Последние N реплик сессии в хронологическом порядке (Sprint 11). */
+  tailBySession(sessionId: string, limit: number): EpisodeRow[] {
+    if (limit <= 0) return [];
+    const rows = this.db
+      .prepare(
+        `SELECT id, session_id, role, content, provenance, created_at
+         FROM episodes WHERE session_id = ? ORDER BY created_at DESC LIMIT ?`,
+      )
+      .all(sessionId, limit) as RawEpisode[];
+    return rows.map(toRow).reverse();
+  }
 }
 
 interface RawEpisode {

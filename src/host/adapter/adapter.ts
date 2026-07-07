@@ -11,6 +11,7 @@ import type { QueueStore } from '../queue/store.ts';
 import { parseOutboundPayload } from '../orchestrator/message.ts';
 import { classifyUpdate, extractUntrustedBody } from './policy.ts';
 import type { ChannelState } from './state.ts';
+import { TG_SESSION_PREFIX, type ChannelAdapter } from './channel.ts';
 import { TelegramError, type TelegramClient, type TgUpdate } from './telegram-client.ts';
 
 export interface TelegramAdapterOptions {
@@ -21,7 +22,6 @@ export interface TelegramAdapterOptions {
 }
 
 const ACTOR = 'adapter';
-const SESSION_PREFIX = 'tg:';
 
 function quarantineSource(reason: 'forwarded' | 'non_text'): 'forwarded' | 'attachment' {
   return reason === 'forwarded' ? 'forwarded' : 'attachment';
@@ -43,14 +43,14 @@ function defaultSleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-/** 'tg:123' → 123; undefined — сессия не принадлежит этому каналу. */
+/** 'tg:123' → 123; undefined — сессия не принадлежит Telegram. */
 export function chatIdFromSession(sessionId: string): number | undefined {
-  if (!sessionId.startsWith(SESSION_PREFIX)) return undefined;
-  const n = Number(sessionId.slice(SESSION_PREFIX.length));
+  if (!sessionId.startsWith(TG_SESSION_PREFIX)) return undefined;
+  const n = Number(sessionId.slice(TG_SESSION_PREFIX.length));
   return Number.isSafeInteger(n) ? n : undefined;
 }
 
-export class TelegramAdapter {
+export class TelegramAdapter implements ChannelAdapter {
   private readonly client: TelegramClient;
   private readonly queues: QueueStore;
   private readonly audit: AuditLog;
@@ -213,7 +213,7 @@ export class TelegramAdapter {
       case 'owner_text':
         this.queues.publish(
           'inbound',
-          JSON.stringify({ text: c.text, session_id: `${SESSION_PREFIX}${c.chatId}` }),
+          JSON.stringify({ text: c.text, session_id: `${TG_SESSION_PREFIX}${c.chatId}` }),
           'owner',
         );
         this.audit.append({
@@ -229,7 +229,7 @@ export class TelegramAdapter {
           JSON.stringify({
             kind: 'approved_action',
             token: c.token,
-            session_id: `${SESSION_PREFIX}${c.chatId}`,
+            session_id: `${TG_SESSION_PREFIX}${c.chatId}`,
           }),
           'owner',
         );
@@ -254,7 +254,7 @@ export class TelegramAdapter {
             kind: 'quarantine_content',
             source,
             body,
-            session_id: `${SESSION_PREFIX}${c.chatId}`,
+            session_id: `${TG_SESSION_PREFIX}${c.chatId}`,
           }),
           'quarantine',
         );

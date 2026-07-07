@@ -53,7 +53,6 @@ describe('buildRunArgs — hardened-профиль ADR-0006', () => {
   it('непустой allowedHosts → internal-сеть (enforce хостов — на брокере)', () => {
     const a = args(limits({ allowedHosts: ['api.example.com'] }));
     expect(a[a.indexOf('--network') + 1]).toBe(NET);
-    // сам список хостов в argv не попадает — это не политика runner'а
     expect(a.join(' ')).not.toContain('api.example.com');
   });
 
@@ -64,10 +63,39 @@ describe('buildRunArgs — hardened-профиль ADR-0006', () => {
     expect(a.slice(-3)).toEqual([IMAGE, '/bin/sh', '/skill/main.sh']);
   });
 
+  it('workspaceDir добавляет rw-mount /workspace', () => {
+    const a = buildRunArgs({
+      name: 't',
+      skillDir: '/skills/demo',
+      entrypoint: 'main.sh',
+      limits: limits(),
+      image: IMAGE,
+      internalNetwork: NET,
+      workspaceDir: '/data/workspace',
+    });
+    expect(a).toContain('/data/workspace:/workspace:rw');
+  });
+
   it('path traversal в entrypoint отклоняется', () => {
     expect(() => args(limits(), '../host.sh')).toThrow(/relative path/);
     expect(() => args(limits(), 'a/../../b.sh')).toThrow(/relative path/);
     expect(() => args(limits(), '/etc/passwd')).toThrow(/relative path/);
+  });
+
+  it('передаёт -e env перед образом', () => {
+    const a = buildRunArgs({
+      name: 't',
+      skillDir: '/skills/demo',
+      entrypoint: 'main.sh',
+      limits: limits(),
+      image: IMAGE,
+      internalNetwork: NET,
+      env: { TARGET_HOST: 'example.com' },
+    });
+    const imageIdx = a.indexOf(IMAGE);
+    expect(a[imageIdx - 2]).toBe('-e');
+    expect(a[imageIdx - 1]).toBe('TARGET_HOST=example.com');
+    expect(a.slice(-3)).toEqual([IMAGE, '/bin/sh', '/skill/main.sh']);
   });
 });
 

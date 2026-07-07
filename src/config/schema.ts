@@ -26,6 +26,20 @@ export const telegramSchema = z
   })
   .strict();
 
+export const discordSchema = z
+  .object({
+    bot_token_ref: keyRef,
+    pairing_code_ref: keyRef,
+  })
+  .strict();
+
+export const emailInputSchema = z
+  .object({
+    poll_interval_s: z.number().int().min(5).default(60),
+    session_id: z.string().min(1).default('email:inbox'),
+  })
+  .strict();
+
 export const scheduleSchema = z
   .object({
     id: z.string().min(1),
@@ -50,6 +64,74 @@ export const learningSchema = z
     self_improvement_llm_enabled: z.boolean().default(false),
     /** Минимальный reuse_rate для scheduler LLM-задач (0 = не проверять). */
     min_reuse_rate: z.number().min(0).max(1).default(0),
+    /** F5: повторов задачи для предложения draft-навыка. */
+    skill_proposal_threshold: z.number().int().min(2).default(3),
+    skill_proposal_window_days: z.number().int().min(1).default(14),
+    /** F6: дней без использования → кандидат на архив. */
+    skill_curator_stale_days: z.number().int().min(1).default(30),
+    skill_curator_min_success_rate: z.number().min(0).max(1).default(0.5),
+  })
+  .strict();
+
+export const memoryContextSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    dialog_tail: z.number().int().min(0).max(50).default(10),
+    recall_k: z.number().int().min(0).max(20).default(3),
+    max_tokens: z.number().int().min(256).max(8192).default(2048),
+  })
+  .strict();
+
+export const memorySchema = z
+  .object({
+    context: memoryContextSchema.default({
+      enabled: true,
+      dialog_tail: 10,
+      recall_k: 3,
+      max_tokens: 2048,
+    }),
+  })
+  .strict();
+
+export const webSchema = z
+  .object({
+    max_response_kb: z.number().int().positive().default(512),
+    cache_ttl_s: z.number().int().positive().default(3600),
+    broker_host: z.string().min(1).default('aegis-broker:8080'),
+  })
+  .strict();
+
+export const sandboxSchema = z
+  .object({
+    /** Выделенная rw-директория workspace (F4); по умолчанию data_dir/workspace. */
+    workspace_dir: z.string().min(1).optional(),
+  })
+  .strict();
+
+const actionClassSchema = z.enum(['read-only', 'reversible', 'irreversible']);
+
+export const mcpToolSchema = z
+  .object({
+    name: z.string().min(1),
+    action_class: actionClassSchema,
+  })
+  .strict();
+
+export const mcpServerSchema = z
+  .object({
+    name: z.string().regex(/^[a-z0-9]+(-[a-z0-9]+)*$/),
+    transport: z.literal('stdio'),
+    command: z.array(z.string().min(1)).min(1),
+    /** Host-путь к MCP-серверу; монтируется в sandbox как /mcp-server (F8). */
+    server_dir: z.string().min(1).optional(),
+    tools: z.array(mcpToolSchema).min(1),
+    allowed_hosts: z.array(z.string().min(1)).optional(),
+  })
+  .strict();
+
+export const mcpSchema = z
+  .object({
+    servers: z.array(mcpServerSchema).default([]),
   })
   .strict();
 
@@ -64,7 +146,15 @@ export const configSchema = z
     learning: learningSchema.default({
       self_improvement_llm_enabled: false,
       min_reuse_rate: 0,
+      skill_proposal_threshold: 3,
+      skill_proposal_window_days: 14,
+      skill_curator_stale_days: 30,
+      skill_curator_min_success_rate: 0.5,
     }),
+    memory: memorySchema.optional(),
+    web: webSchema.optional(),
+    sandbox: sandboxSchema.optional(),
+    mcp: mcpSchema.optional(),
     llm: z
       .object({
         p_llm: llmProfileSchema,
@@ -72,12 +162,23 @@ export const configSchema = z
       })
       .strict(),
     telegram: telegramSchema,
+    discord: discordSchema.optional(),
+    email: emailInputSchema.optional(),
   })
   .strict();
 
 export type AegisConfig = z.infer<typeof configSchema>;
 export type LlmProfile = z.infer<typeof llmProfileSchema>;
 export type TelegramConfig = z.infer<typeof telegramSchema>;
+export type DiscordConfig = z.infer<typeof discordSchema>;
+export type EmailInputConfig = z.infer<typeof emailInputSchema>;
 export type BudgetConfig = z.infer<typeof budgetSchema>;
 export type ScheduleConfig = z.infer<typeof scheduleSchema>;
 export type LearningConfig = z.infer<typeof learningSchema>;
+export type MemoryContextConfigJson = z.infer<typeof memoryContextSchema>;
+export type MemoryConfig = z.infer<typeof memorySchema>;
+export type WebConfig = z.infer<typeof webSchema>;
+export type SandboxConfig = z.infer<typeof sandboxSchema>;
+export type McpConfig = z.infer<typeof mcpSchema>;
+export type McpServerConfig = z.infer<typeof mcpServerSchema>;
+export type McpStdioServerConfig = McpServerConfig;

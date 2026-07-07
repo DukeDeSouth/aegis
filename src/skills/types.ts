@@ -34,6 +34,8 @@ export interface SkillManifest {
   action_class: ActionClass;
   code: boolean;
   entrypoints: string[];
+  /** F7: внешний импорт — не в prompt до /skill-approve. */
+  requires_review?: boolean;
 }
 
 export interface SkillSummary {
@@ -60,4 +62,5 @@ export interface InstallResult {
   name: string;
   ref: string;
   knowledgeId: number;
+  requiresReview?: boolean;
 }

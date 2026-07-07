@@ -4,7 +4,7 @@
  * позитивный контроль (IMPACT R1): команда падает из-за границы, а не потому,
  * что окружение сломано.
  */
-import { writeFileSync, rmSync } from 'node:fs';
+import { writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DockerSandboxRunner } from '../../src/sandbox/runner.ts';
@@ -104,6 +104,24 @@ describe.skipIf(!hasDocker)('V3: побег из sandbox невозможен', 
       limits(),
     );
     expect(r.exitCode).not.toBe(0);
+  });
+
+  it('workspace mount rw: пишет в /workspace, не в /skill', async () => {
+    const wsDir = mountableTmpDir('aegis-v3-ws-');
+    const wsRunner = new DockerSandboxRunner({
+      image: ALPINE,
+      internalNetwork: NET,
+      workspaceDir: wsDir,
+    });
+    const r = await wsRunner.run(
+      skillDir,
+      skill('ws.sh', 'echo WS_OK > /workspace/out.txt && touch /skill/x; echo SKILL_TOUCH=$?'),
+      limits(),
+    );
+    expect(r.stdout).toContain('WS_OK');
+    expect(r.stdout).toContain('SKILL_TOUCH=1');
+    expect(readFileSync(join(wsDir, 'out.txt'), 'utf8').trim()).toBe('WS_OK');
+    rmSync(wsDir, { recursive: true, force: true });
   });
 
   it('таймаут: зависший код убивается, timedOut взводится', async () => {

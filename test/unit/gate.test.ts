@@ -12,6 +12,18 @@ describe('GateEngine.evaluate', () => {
     expect(d.actionClass).toBe('read-only');
   });
 
+  it('file.read + owner → allow; file.write reversible + owner → allow', () => {
+    expect(evaluate({ actionId: 'file.read', provenance: 'owner' }, healthy).verdict).toBe(
+      'allow',
+    );
+    expect(evaluate({ actionId: 'file.write', provenance: 'owner' }, healthy).verdict).toBe(
+      'allow',
+    );
+    expect(evaluate({ actionId: 'file.write', provenance: 'quarantine' }, healthy).verdict).toBe(
+      'deny',
+    );
+  });
+
   it('read-only + quarantine → deny', () => {
     const d = evaluate({ actionId: 'memory.read', provenance: 'quarantine' }, healthy);
     expect(d.verdict).toBe('deny');

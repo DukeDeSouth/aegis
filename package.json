@@ -8,8 +8,15 @@
   "engines": {
     "node": ">=24"
   },
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "start": "node src/host/main.ts",
+    "setup": "node packages/aegis-setup/bin/aegis-setup.mjs",
+    "setup:test": "npm test -w aegis-setup",
+    "dashboard": "node packages/aegis-dashboard/bin/aegis-dashboard.mjs",
+    "dashboard:test": "npm test -w aegis-dashboard",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

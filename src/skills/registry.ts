@@ -19,6 +19,8 @@ export class SkillRegistry {
   private readonly skills = new Map<string, LoadedSkill>();
   /** Имена code-навыков, прошедших dry-run (corroborated). */
   private readonly corroboratedCode = new Set<string>();
+  /** F7: owner одобрил requires_review импорт. */
+  private readonly reviewApproved = new Set<string>();
 
   constructor(skillsDir: string) {
     this.skillsDir = skillsDir;
@@ -30,6 +32,7 @@ export class SkillRegistry {
     if (!existsSync(this.skillsDir)) return;
 
     for (const entry of readdirSync(this.skillsDir)) {
+      if (entry.startsWith('.')) continue;
       const dir = join(this.skillsDir, entry);
       if (!statSync(dir).isDirectory()) continue;
       const manifestPath = join(dir, 'manifest.json');
@@ -63,7 +66,11 @@ export class SkillRegistry {
 
   /** Навыки для inject в system prompt (прогрессивное раскрытие: только метаданные). */
   listForPrompt(): SkillSummary[] {
-    return this.list().filter((s) => !s.code || this.corroboratedCode.has(s.name));
+    return this.list().filter((s) => {
+      const m = this.skills.get(s.name)?.manifest;
+      if (m?.requires_review && !this.reviewApproved.has(s.name)) return false;
+      return !s.code || this.corroboratedCode.has(s.name);
+    });
   }
 
   view(name: string): string | undefined {
@@ -89,8 +96,17 @@ export class SkillRegistry {
   isCodeSkillReady(name: string): boolean {
     const s = this.skills.get(name);
     if (!s) return false;
+    if (s.manifest.requires_review && !this.reviewApproved.has(name)) return false;
     if (!s.manifest.code) return true;
     return this.corroboratedCode.has(name);
+  }
+
+  markReviewApproved(name: string): void {
+    this.reviewApproved.add(name);
+  }
+
+  isReviewApproved(name: string): boolean {
+    return this.reviewApproved.has(name);
   }
 
   /** max(action_class) среди навыков, доступных в prompt. */

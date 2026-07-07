@@ -17,6 +17,22 @@ export interface SandboxRunResult {
   timedOut: boolean;
 }
 
+export interface SandboxRunOptions {
+  /** Образ для этого запуска (MCP bridge требует Node). */
+  readonly image?: string;
+  readonly extraMounts?: readonly {
+    readonly hostPath: string;
+    readonly containerPath: string;
+    readonly readOnly?: boolean;
+  }[];
+}
+
 export interface SandboxRunner {
-  run(skillDir: string, entrypoint: string, limits: SandboxLimits): Promise<SandboxRunResult>;
+  run(
+    skillDir: string,
+    entrypoint: string,
+    limits: SandboxLimits,
+    env?: Record<string, string>,
+    opts?: SandboxRunOptions,
+  ): Promise<SandboxRunResult>;
 }

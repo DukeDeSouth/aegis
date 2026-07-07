@@ -5,10 +5,12 @@ import type Database from 'better-sqlite3';
 import type { AuditLog } from '../audit/log.ts';
 import type { QueueStore } from '../queue/store.ts';
 import { fireKey, isDue, parseCron, type CronSpec } from './cron.ts';
+import type { ReminderStore } from './reminders.ts';
 import type { ScheduleEntry } from './types.ts';
 
 export interface ScheduleRunnerOptions {
   schedules: ScheduleEntry[];
+  reminders?: ReminderStore;
   tickMs?: number;
   now?: () => number;
 }
@@ -39,6 +41,7 @@ export class ScheduleRunner {
   private readonly db: Database.Database;
   private readonly audit: AuditLog;
   private readonly schedules: ParsedSchedule[];
+  private readonly reminders: ReminderStore | undefined;
   private readonly tickMs: number;
   private readonly now: () => number;
 
@@ -51,6 +54,7 @@ export class ScheduleRunner {
     this.queues = queues;
     this.db = db;
     this.audit = audit;
+    this.reminders = opts.reminders;
     this.schedules = opts.schedules.map((entry) => ({
       entry,
       spec: parseCron(entry.cron),
@@ -84,6 +88,26 @@ export class ScheduleRunner {
         action: 'scheduler.fired',
         decision: 'info',
         payload: { scheduleId: entry.id, fireKey: key, sessionId },
+      });
+    }
+    this.tickReminders();
+  }
+
+  private tickReminders(): void {
+    if (!this.reminders) return;
+    const nowMs = this.now();
+    for (const r of this.reminders.due(nowMs)) {
+      this.queues.publish(
+        'outbound',
+        JSON.stringify({ text: `⏰ ${r.text}`, session_id: r.sessionId }),
+        'scheduler',
+      );
+      this.reminders.markFired(r.id);
+      this.audit.append({
+        actor: 'scheduler',
+        action: 'reminder.fired',
+        decision: 'info',
+        payload: { reminderId: r.id, sessionId: r.sessionId },
       });
     }
   }

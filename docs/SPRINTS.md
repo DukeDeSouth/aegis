@@ -146,7 +146,187 @@
 
 ---
 
-## После MVP (бэклог, без спринтов)
+## Sprint 11 — История диалога + active recall (Post-MVP, F1)
+
+**Цель:** P-LLM видит последние N реплик и релевантные эпизоды без потери плана между сообщениями.
+
+**Спека:** [`POST_MVP_FEATURES.md`](POST_MVP_FEATURES.md) § F1
+
+- [x] `EpisodeStore.tailBySession` — хвост диалога ASC (S)
+- [x] `buildSessionContext` в `context.ts` — tail + FTS recall + knowledge (M)
+- [x] Конфиг `memory.context.{enabled, dialog_tail, recall_k, max_tokens}` (S)
+- [x] Orchestrator: multi-turn `messages[]` в `llm.complete` (M)
+- [x] UNTRUSTED wrap для quarantine episodes в recall/хвосте (S)
+- [x] Token budget trim с eviction recall → tail → knowledge (M)
+
+**DoD:** владелец ссылается на реплику 5+ сообщений назад — агент отвечает без повторного объяснения; active recall без LLM на этапе подбора; `npm run test:security` зелёный; расширение V4 для recall path. E2e — `test/integration/context-loop.test.ts`. **Sprint 11 закрыт.**
+
+---
+
+## Sprint 12 — Web-fetch через broker + карантин (Post-MVP, F2)
+
+**Цель:** `/fetch <url>` загружает страницу через sandbox+broker, выжимка проходит Q→P.
+
+**Спека:** [`POST_MVP_FEATURES.md`](POST_MVP_FEATURES.md) § F2
+
+- [x] Gate `web.fetch` (read-only, requiresBroker, quarantineRequired)
+- [x] SSRF-валидация URL в ядре (`validateFetchUrl`)
+- [x] `SandboxWebFetcher` + `skills/web-fetch/fetch.sh`
+- [x] `web_cache` (миграция `0002-memory.sql`)
+- [x] `/fetch` → `handleQuarantineTurn` (source `web`)
+- [x] Конфиг `web.{max_response_kb, cache_ttl_s, broker_host}`
+
+**DoD:** `/fetch https://…` → quarantine pipeline; V1 injection со страницы не вызывает sandbox.run; SSRF блокируется; e2e `test/integration/fetch-loop.test.ts`. **Sprint 12 закрыт.**
+
+---
+
+## Sprint 13 — Стартовые навыки (Post-MVP, F3)
+
+**Цель:** свежая установка полезна без маркетплейса — 4 декларативных навыка + команды оркестратора.
+
+**Спека:** [`POST_MVP_FEATURES.md`](POST_MVP_FEATURES.md) § F3
+
+- [x] `skills/web-digest` — источники в SKILL.md, `/digest` + cron
+- [x] `skills/reminders` — `/remind HH:MM`, `ReminderStore` + tick scheduler
+- [x] `skills/memory-search` — `/summarize <query>` (FTS + один `llm.invoke`)
+- [x] `skills/agent-status` — `/status` (metrics + budget + pending + skills)
+- [x] Миграция `0005-queue.sql` (`reminders`)
+
+**DoD:** новые навыки проходят `SkillRegistry`/`validate`; e2e `test/integration/starter-skills-loop.test.ts`; без новых gate-классов. **Sprint 13 закрыт.**
+
+---
+
+## Sprint 14 — Workspace (Post-MVP, F4)
+
+**Цель:** безопасные file.read/file.write в выделенной директории + rw-mount для sandbox.
+
+**Спека:** [`POST_MVP_FEATURES.md`](POST_MVP_FEATURES.md) § F4
+
+- [x] Gate `file.read` (read-only), `file.write` (reversible)
+- [x] `WorkspaceStore` — path validation (realpath), trash backup, undo
+- [x] Команды `/read`, `/write path | content`, `/undo-file`, `/delete-file`
+- [x] Конфиг `sandbox.workspace_dir`; Docker rw-mount `/workspace`
+- [x] V3: workspace mount + unit path escape
+
+**DoD:** цикл write→read→undo; traversal/symlink блокируются; e2e `test/integration/workspace-loop.test.ts`. **Sprint 14 закрыт.**
+
+---
+
+## Sprint 15 — Draft-навыки из эпизодов (Post-MVP, F5)
+
+**Цель:** верифицируемый learning loop — детектор повторов → draft → owner accept/reject.
+
+**Спека:** [`POST_MVP_FEATURES.md`](POST_MVP_FEATURES.md) § F5
+
+- [x] `SkillProposalRunner` — сигнатура сессий, порог ≥3 за 14 дней
+- [x] Черновики в `skills/.drafts/` (не в system prompt)
+- [x] `validateNeedsSubset` + scanner + manifest validate
+- [x] `/curate` запускает детектор; `/skill-review|accept|reject`
+- [x] Миграция `0006-memory.sql`; `learning.skill_proposal_threshold`
+
+**DoD:** propose → accept → skill в registry; V4 draft isolation; e2e `test/integration/skill-proposal-loop.test.ts`. **Sprint 15 закрыт.**
+
+---
+
+## Sprint 16 — Skill Curator (Post-MVP, F6)
+
+**Цель:** детерминированный грейдинг навыков — метрики, отчёт, archive с откатом.
+
+**Спека:** [`POST_MVP_FEATURES.md`](POST_MVP_FEATURES.md) § F6
+
+- [x] `skill_metrics` (invocations, successes, last_used_at) — миграция `0007-memory.sql`
+- [x] `SkillCurator` — stale / low success-rate / duplicates
+- [x] `/curate-skills`, `/skill-archive`, `/skill-unarchive` (snapshot перед archive)
+- [x] Skill reuse в `/metrics`
+- [x] Конфиг `learning.skill_curator_stale_days`, `skill_curator_min_success_rate`
+
+**DoD:** archive → навык вне `/skills` и prompt; unarchive восстанавливает; e2e `test/integration/skill-curator-loop.test.ts`. **Sprint 16 закрыт.**
+
+---
+
+## Sprint 17 — Импорт SKILL.md (Post-MVP, F7)
+
+**Цель:** совместимость с agentskills.io / SKILL.md без маркетплейса.
+
+**Спека:** [`POST_MVP_FEATURES.md`](POST_MVP_FEATURES.md) § F7
+
+- [x] `importExternalSkill` — frontmatter → manifest ADR-0007, infer capabilities из тела
+- [x] `requires_review` при пустых caps / risky-паттернах / без description
+- [x] `SkillInstaller` — SKILL.md-only репозитории, scanner до установки
+- [x] `SkillRegistry.reviewApproved` — навык не в prompt до `/skill-approve`
+- [x] Fixture-набор + security: risky body → scanner block
+
+**DoD:** `/skill-install` внешнего навыка → review → approve → в prompt; e2e `test/integration/skill-import-loop.test.ts`. **Sprint 17 закрыт.**
+
+---
+
+## Sprint 18 — MCP через gate (Post-MVP, F8)
+
+**Цель:** внешние MCP-tools с fail-closed маппингом и quarantine ответов.
+
+**Спека:** [`POST_MVP_FEATURES.md`](POST_MVP_FEATURES.md) § F8
+
+- [x] Config `mcp.servers[]` — stdio transport, tool → action_class
+- [x] Динамический gate `mcp.<server>.<tool>`; немаппленный tool = deny
+- [x] `StdioMcpClient` + `/mcp` → Q→P (`source: mcp`)
+- [x] Sandbox stdio bridge (`server_dir`, Node image)
+- [x] Irreversible MCP → `pending_actions` / `/approve`
+- [x] Env isolation (V8); V1 MCP injection test
+
+**DoD:** owner `/mcp` end-to-end; unmapped denied; irreversible pending; e2e `test/integration/mcp-loop.test.ts`. **Sprint 18 закрыт.**
+
+---
+
+## Sprint 19 — Установка одной командой (Post-MVP, F9)
+
+**Цель:** `npx aegis-setup` — визард без `curl|bash`, вне LOC ядра.
+
+**Спека:** [`POST_MVP_FEATURES.md`](POST_MVP_FEATURES.md) § F9
+
+- [x] `packages/aegis-setup` — `init`, `verify`, `upgrade`
+- [x] Генерация config, env, compose, broker templates, pairing code
+- [x] Bundled `deploy/broker` templates
+- [x] Unit-тесты пакета; root workspace
+
+**DoD:** `aegis-setup init --yes` + `verify` на свежем clone. **Sprint 19 закрыт.**
+
+---
+
+## Sprint 20 — Дополнительные каналы (Post-MVP, F10)
+
+**Цель:** Discord + email-as-input поверх `ChannelAdapter` без изменений оркестратора.
+
+**Спека:** [`POST_MVP_FEATURES.md`](POST_MVP_FEATURES.md) § F10
+
+- [x] `ChannelAdapter` + session prefixes (`tg:` / `discord:` / `email:`)
+- [x] `DiscordAdapter` — Gateway v10, DM-only, `/pair`, stranger deny, outbound
+- [x] `EmailInputAdapter` — unconditional quarantine (`source: email`)
+- [x] Миграция `0008-queue.sql` — discord/email keys в `channel_state`
+- [x] E2E: `discord-adapter.test.ts`, `email-adapter.test.ts`; unit `discord-policy.test.ts`
+
+**DoD:** pairing + quarantine path без правок orchestrator; 250 тестов; LOC 7293/7500. **Sprint 20 закрыт.**
+
+---
+
+## Sprint 21 — Read-only web-дашборд (Post-MVP, F11)
+
+**Цель:** наблюдаемость в браузере без поверхности записи.
+
+**Спека:** [`POST_MVP_FEATURES.md`](POST_MVP_FEATURES.md) § F11
+
+- [x] `packages/aegis-dashboard` — отдельный процесс, `readonly` SQLite
+- [x] Bind `127.0.0.1:8787`; `GET /` only; CSP headers
+- [x] Очереди, pending, audit chain, budget, reuse, skills, curation
+- [x] Подсказки `/approve <token>`; XSS escape для карантина
+- [x] Тесты ro + XSS + HTTP; CI `dashboard:test`
+
+**DoD:** полная картина состояния без SSH; write surface = 0. **Sprint 21 закрыт.**
+
+---
+
+## После MVP (бэклог)
+
+Спринты 17+ — см. [`POST_MVP_FEATURES.md`](POST_MVP_FEATURES.md) (F7–F11).
 
 - Дополнительные каналы (по одному, только официальные API)
 - Вынос broker на отдельный хост / micro-VM для sandbox
@@ -166,5 +346,16 @@
 | 7      | Карантин входа                |                    |
 | 8–9    | Навыки, автоматизации, бюджет |                    |
 | 10     | Экономика и релиз             | **MVP**            |
+| 11     | Post-MVP F1: контекст диалога |                    |
+| 12     | Post-MVP F2: web-fetch        |                    |
+| 13     | Post-MVP F3: стартовые навыки |                  |
+| 14     | Post-MVP F4: workspace        |                  |
+| 15     | Post-MVP F5: draft-навыки     |                  |
+| 16     | Post-MVP F6: Skill Curator    |                  |
+| 17     | Post-MVP F7: импорт SKILL.md  |                  |
+| 18     | Post-MVP F8: MCP через gate   |                  |
+| 19     | Post-MVP F9: aegis-setup      |                  |
+| 20     | Post-MVP F10: Discord + email |                  |
+| 21     | Post-MVP F11: dashboard       |                  |
 
 Ориентир: ~10 спринтов ≈ 20 недель до MVP для команды 1–3 человека. Оценки уточняются после Sprint 0.

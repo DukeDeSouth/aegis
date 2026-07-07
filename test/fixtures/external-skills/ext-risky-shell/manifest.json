@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "name": "ext-risky",
+  "version": "0.1.0",
+  "needs": [
+    "web.fetch"
+  ],
+  "network": [
+    "aegis-broker"
+  ],
+  "action_class": "read-only",
+  "code": true,
+  "entrypoints": [
+    "scripts/run.sh"
+  ],
+  "requires_review": true
+}

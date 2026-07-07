@@ -3,7 +3,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const LIMIT = 4000;
+const LIMIT = 7500; // ADR-0009: post-MVP F8 MCP sandbox
 
 function countDir(dir) {
   let total = 0;

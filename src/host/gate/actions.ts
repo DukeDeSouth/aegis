@@ -7,12 +7,22 @@ export interface ActionSpec {
   readonly id: string;
   readonly actionClass: ActionClass;
   readonly requiresBroker: boolean;
+  /** F2: ответ обязан пройти Q→P, не попадать в P-LLM как сырой контент. */
+  readonly quarantineRequired?: boolean;
 }
 
 export const ACTIONS: Record<string, ActionSpec> = {
   'llm.invoke': { id: 'llm.invoke', actionClass: 'reversible', requiresBroker: false },
   'message.send': { id: 'message.send', actionClass: 'reversible', requiresBroker: false },
   'memory.read': { id: 'memory.read', actionClass: 'read-only', requiresBroker: false },
+  'web.fetch': {
+    id: 'web.fetch',
+    actionClass: 'read-only',
+    requiresBroker: true,
+    quarantineRequired: true,
+  },
+  'file.read': { id: 'file.read', actionClass: 'read-only', requiresBroker: false },
+  'file.write': { id: 'file.write', actionClass: 'reversible', requiresBroker: false },
   'sandbox.run': { id: 'sandbox.run', actionClass: 'reversible', requiresBroker: true },
   'action.dangerous': {
     id: 'action.dangerous',

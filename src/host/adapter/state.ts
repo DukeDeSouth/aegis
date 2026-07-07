@@ -1,7 +1,5 @@
 /**
- * Состояние Telegram-канала поверх channel_state (queue.db, миграция 0002):
- * owner_user_id — результат pairing'а, пишется ровно один раз (защита от переугона);
- * updates_offset — протокол getUpdates, переживает рестарт (at-least-once, см. IMPACT R4).
+ * channel_state (queue.db): namespaced keys per channel (F10).
  */
 import type Database from 'better-sqlite3';
 
@@ -13,21 +11,15 @@ export class ChannelState {
   }
 
   getOwnerUserId(): number | undefined {
-    return this.read('owner_user_id');
+    return this.readNumber('owner_user_id');
   }
 
-  /** Однократная запись: повторный вызов — ошибка, владелец не перезаписывается. */
   setOwnerUserId(id: number): void {
-    if (this.getOwnerUserId() !== undefined) {
-      throw new Error('channel already paired: owner_user_id is write-once');
-    }
-    this.db
-      .prepare(`INSERT INTO channel_state (key, value) VALUES ('owner_user_id', ?)`)
-      .run(String(id));
+    this.writeOnce('owner_user_id', String(id));
   }
 
   getOffset(): number | undefined {
-    return this.read('updates_offset');
+    return this.readNumber('updates_offset');
   }
 
   setOffset(value: number): void {
@@ -36,11 +28,54 @@ export class ChannelState {
       .run(String(value));
   }
 
-  private read(key: string): number | undefined {
-    const row = this.db.prepare('SELECT value FROM channel_state WHERE key = ?').get(key) as
-      { value: string } | undefined;
-    if (!row) return undefined;
-    const n = Number(row.value);
+  getDiscordOwnerId(): string | undefined {
+    return this.readString('discord_owner_user_id');
+  }
+
+  setDiscordOwnerId(id: string): void {
+    this.writeOnce('discord_owner_user_id', id);
+  }
+
+  getDiscordLastSequence(): number | undefined {
+    return this.readNumber('discord_last_sequence');
+  }
+
+  setDiscordLastSequence(seq: number): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO channel_state (key, value) VALUES ('discord_last_sequence', ?)`,
+      )
+      .run(String(seq));
+  }
+
+  getEmailLastUid(): number | undefined {
+    return this.readNumber('email_last_uid');
+  }
+
+  setEmailLastUid(uid: number): void {
+    this.db
+      .prepare(`INSERT OR REPLACE INTO channel_state (key, value) VALUES ('email_last_uid', ?)`)
+      .run(String(uid));
+  }
+
+  private writeOnce(key: string, value: string): void {
+    if (this.readString(key) !== undefined) {
+      throw new Error(`channel already paired: ${key} is write-once`);
+    }
+    this.db.prepare(`INSERT INTO channel_state (key, value) VALUES (?, ?)`).run(key, value);
+  }
+
+  private readNumber(key: string): number | undefined {
+    const s = this.readString(key);
+    if (s === undefined) return undefined;
+    const n = Number(s);
     return Number.isFinite(n) ? n : undefined;
+  }
+
+  private readString(key: string): string | undefined {
+    const row = this.db.prepare('SELECT value FROM channel_state WHERE key = ?').get(key) as
+      | { value: string }
+      | undefined;
+    return row?.value;
   }
 }

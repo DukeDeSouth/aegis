@@ -211,6 +211,28 @@ describe('0003-queue.sql', () => {
   });
 });
 
+describe('0008-queue.sql', () => {
+  const db = freshDb('0001-queue.sql', 'queue-v8.db');
+  applyMigration(db, readFileSync(new URL('../../migrations/0002-queue.sql', import.meta.url), 'utf8'), 2);
+  const sql = readFileSync(new URL('../../migrations/0008-queue.sql', import.meta.url), 'utf8');
+  applyMigration(db, sql, 8);
+  applyMigration(db, sql, 8);
+
+  it('channel_state принимает discord и email ключи (CHECK)', () => {
+    db.prepare(`INSERT INTO channel_state (key, value) VALUES ('discord_owner_user_id', 'u1')`).run();
+    db.prepare(`INSERT INTO channel_state (key, value) VALUES ('discord_last_sequence', '10')`).run();
+    db.prepare(`INSERT INTO channel_state (key, value) VALUES ('email_last_uid', '3')`).run();
+    expect(db.prepare('SELECT COUNT(*) c FROM channel_state').get()).toEqual({ c: 3 });
+    expect(() =>
+      db.prepare(`INSERT INTO channel_state (key, value) VALUES ('smtp_password', 'x')`).run(),
+    ).toThrow(/CHECK/);
+  });
+
+  it('user_version = 8 после миграции', () => {
+    expect(db.pragma('user_version', { simple: true })).toBe(8);
+  });
+});
+
 describe('0001-audit.sql', () => {
   const db = freshDb('0001-audit.sql', 'audit.db');
 

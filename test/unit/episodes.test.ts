@@ -40,6 +40,25 @@ describe('EpisodeStore', () => {
     store.append('s2', 'owner', 'b', 'owner');
     expect(store.listBySession('s1')).toHaveLength(1);
   });
+
+  it('tailBySession возвращает последние N в хронологическом порядке', () => {
+    const db = memoryDb();
+    const store = new EpisodeStore(db, { now: () => NOW });
+    store.append('s1', 'owner', 'first', 'owner');
+    store.append('s1', 'assistant', 'second', 'orchestrator');
+    store.append('s1', 'owner', 'third', 'owner');
+    const tail = store.tailBySession('s1', 2);
+    expect(tail).toHaveLength(2);
+    expect(tail[0]?.content).toBe('second');
+    expect(tail[1]?.content).toBe('third');
+  });
+
+  it('tailBySession limit 0 → []', () => {
+    const db = memoryDb();
+    const store = new EpisodeStore(db, { now: () => NOW });
+    store.append('s1', 'owner', 'a', 'owner');
+    expect(store.tailBySession('s1', 0)).toEqual([]);
+  });
 });
 
 describe('escapeFtsQuery', () => {

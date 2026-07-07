@@ -24,6 +24,8 @@ export interface DockerSandboxOptions {
   image: string;
   /** Internal-сеть с брокером (docker network --internal). */
   internalNetwork: string;
+  /** F4: rw-mount workspace в контейнер как /workspace. */
+  workspaceDir?: string;
   /** Инжектируется в тестах; по умолчанию — execFile('docker', ...). */
   exec?: ExecFn;
 }
@@ -51,13 +53,17 @@ export function buildRunArgs(opts: {
   limits: SandboxLimits;
   image: string;
   internalNetwork: string;
+  workspaceDir?: string;
+  env?: Record<string, string>;
+  extraMounts?: readonly { hostPath: string; containerPath: string; readOnly?: boolean }[];
 }): string[] {
-  const { name, skillDir, entrypoint, limits, image, internalNetwork } = opts;
+  const { name, skillDir, entrypoint, limits, image, internalNetwork, workspaceDir, extraMounts } =
+    opts;
   if (entrypoint.split('/').includes('..') || isAbsolute(entrypoint)) {
     throw new Error(`sandbox: entrypoint must be a relative path inside skillDir`);
   }
   const network = limits.allowedHosts.length === 0 ? 'none' : internalNetwork;
-  return [
+  const args = [
     'run',
     '--rm',
     '--name',
@@ -83,22 +89,35 @@ export function buildRunArgs(opts: {
     '64',
     '-v',
     `${resolve(skillDir)}:/skill:ro`,
+  ];
+  if (workspaceDir) {
+    args.push('-v', `${resolve(workspaceDir)}:/workspace:rw`);
+  }
+  for (const m of extraMounts ?? []) {
+    const ro = m.readOnly !== false ? ':ro' : '';
+    args.push('-v', `${resolve(m.hostPath)}:${m.containerPath}${ro}`);
+  }
+  args.push(
     '--workdir',
     '/skill',
-    image,
-    '/bin/sh',
-    `/skill/${entrypoint}`,
-  ];
+  );
+  for (const [key, value] of Object.entries(opts.env ?? {})) {
+    args.push('-e', `${key}=${value}`);
+  }
+  args.push(image, '/bin/sh', `/skill/${entrypoint}`);
+  return args;
 }
 
 export class DockerSandboxRunner implements SandboxRunner {
   private readonly image: string;
   private readonly internalNetwork: string;
+  private readonly workspaceDir: string | undefined;
   private readonly exec: ExecFn;
 
   constructor(opts: DockerSandboxOptions) {
     this.image = opts.image;
     this.internalNetwork = opts.internalNetwork;
+    this.workspaceDir = opts.workspaceDir;
     this.exec = opts.exec ?? defaultExec;
   }
 
@@ -106,6 +125,8 @@ export class DockerSandboxRunner implements SandboxRunner {
     skillDir: string,
     entrypoint: string,
     limits: SandboxLimits,
+    env?: Record<string, string>,
+    opts?: import('./types.ts').SandboxRunOptions,
   ): Promise<SandboxRunResult> {
     const name = `aegis-sb-${randomBytes(6).toString('hex')}`;
     const argv = buildRunArgs({
@@ -113,8 +134,11 @@ export class DockerSandboxRunner implements SandboxRunner {
       skillDir,
       entrypoint,
       limits,
-      image: this.image,
+      image: opts?.image ?? this.image,
       internalNetwork: this.internalNetwork,
+      ...(this.workspaceDir !== undefined ? { workspaceDir: this.workspaceDir } : {}),
+      ...(env !== undefined ? { env } : {}),
+      ...(opts?.extraMounts !== undefined ? { extraMounts: opts.extraMounts } : {}),
     });
     let timedOut = false;
     // Контейнера может уже не быть (гонка kill/exit) — ошибка kill безопасно глотается.

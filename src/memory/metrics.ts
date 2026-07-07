@@ -16,6 +16,12 @@ export interface BudgetMetricsLine {
   backgroundBlocked: boolean;
 }
 
+export interface StatusExtras {
+  pendingActions: number;
+  pendingReminders: number;
+  skillsLoaded: number;
+}
+
 export function computeReuseMetrics(db: Database.Database): ReuseMetricsSnapshot {
   const row = db
     .prepare(
@@ -41,6 +47,7 @@ function formatPercent(rate: number): string {
 export function formatMetricsReport(
   metrics: ReuseMetricsSnapshot,
   budget?: BudgetMetricsLine,
+  skillReuse?: import('../skills/metrics.ts').SkillReuseSnapshot,
 ): string {
   const lines: string[] = ['## Aegis metrics'];
   if (metrics.injectable === 0) {
@@ -50,6 +57,11 @@ export function formatMetricsReport(
       `Reuse rate: ${formatPercent(metrics.reuseRate!)} (${metrics.used}/${metrics.injectable} knowledge rows used in prompts)`,
     );
   }
+  if (skillReuse && skillReuse.skillsTracked > 0) {
+    lines.push(
+      `Skill reuse: ${formatPercent(skillReuse.reuseRate!)} (${skillReuse.skillsUsed}/${skillReuse.skillsTracked} skills invoked)`,
+    );
+  }
   if (budget) {
     lines.push(
       `Budget today: ${budget.used}/${budget.limit} tokens` +
@@ -57,5 +69,21 @@ export function formatMetricsReport(
     );
   }
   lines.push('Self-improvement LLM: disabled by default in MVP (see learning config).');
+  return lines.join('\n');
+}
+
+export function formatStatusReport(
+  metrics: ReuseMetricsSnapshot,
+  budget?: BudgetMetricsLine,
+  extras?: StatusExtras,
+): string {
+  const lines = [formatMetricsReport(metrics, budget)];
+  if (extras) {
+    lines.push(
+      `Pending human-gate actions: ${extras.pendingActions}`,
+      `Scheduled reminders: ${extras.pendingReminders}`,
+      `Skills loaded: ${extras.skillsLoaded}`,
+    );
+  }
   return lines.join('\n');
 }

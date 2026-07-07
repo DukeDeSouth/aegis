@@ -11,7 +11,23 @@
 | LLM       | OpenAI-совместимый API (локальный Ollama или облако)      |
 | Telegram  | Бот через [@BotFather](https://t.me/BotFather)            |
 
-## Быстрый старт (native host)
+## Быстрый старт (рекомендуется — F9)
+
+```bash
+git clone <your-repo-url> aegis && cd aegis
+npm ci --ignore-scripts && npm rebuild better-sqlite3
+npx aegis-setup init          # или: npm run setup init
+# отредактируйте .env.aegis — LLM keys
+cd deploy && docker compose --env-file .env up -d broker && cd ..
+set -a && source .env.aegis && npm start
+npx aegis-setup verify
+```
+
+Визард генерирует: `aegis.config.json`, `.env.aegis`, `deploy/.env`, `deploy/docker-compose.yml`, broker templates, случайный pairing-код. Секреты **не** попадают в JSON-конфиг (ADR-0008).
+
+Команды: `aegis-setup init | verify | upgrade` — см. `packages/aegis-setup/`.
+
+## Быстрый старт (native host, вручную)
 
 ### 1. Клонирование и зависимости
 

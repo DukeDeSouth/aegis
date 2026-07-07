@@ -4,6 +4,7 @@
  */
 import type { QueueProvenance } from '../queue/store.ts';
 import { ACTIONS, type ActionSpec } from './actions.ts';
+import { lookupMcpAction } from './mcp-actions.ts';
 import type { ActionClass, GateDecision, GateVerdict } from './types.ts';
 
 export interface GateDeps {
@@ -37,7 +38,7 @@ export function evaluate(req: GateRequest, deps: GateDeps): GateDecision {
     return { verdict: 'deny', actionClass: 'irreversible', reason: 'gate unhealthy (fail-closed)' };
   }
 
-  const spec = ACTIONS[req.actionId];
+  const spec = ACTIONS[req.actionId] ?? lookupMcpAction(req.actionId);
   if (!spec) {
     return {
       verdict: 'deny',

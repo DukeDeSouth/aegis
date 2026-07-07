@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "name": "ext-vague",
+  "version": "0.1.0",
+  "needs": [],
+  "network": "none",
+  "action_class": "read-only",
+  "code": false,
+  "entrypoints": [],
+  "requires_review": true
+}

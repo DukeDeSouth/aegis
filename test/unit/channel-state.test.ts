@@ -13,10 +13,11 @@ function migration(name: string): string {
   return readFileSync(new URL(`../../migrations/${name}`, import.meta.url), 'utf8');
 }
 
-function makeDb(name: string): Database.Database {
+function makeDb(name: string, withF10 = false): Database.Database {
   const db = openDb(join(tmp, name));
   applyMigration(db, migration('0001-queue.sql'), 1);
   applyMigration(db, migration('0002-queue.sql'), 2);
+  if (withF10) applyMigration(db, migration('0008-queue.sql'), 8);
   return db;
 }
 
@@ -62,5 +63,21 @@ describe('ChannelState', () => {
     expect(() =>
       db.prepare(`INSERT INTO channel_state (key, value) VALUES ('random_key', 'x')`).run(),
     ).toThrow();
+  });
+
+  it('F10: discord и email ключи write-once / перезапись', () => {
+    const db = makeDb('f10.db', true);
+    const state = new ChannelState(db);
+    state.setDiscordOwnerId('discord-user-1');
+    expect(state.getDiscordOwnerId()).toBe('discord-user-1');
+    expect(() => state.setDiscordOwnerId('other')).toThrow(/already paired/);
+
+    state.setDiscordLastSequence(42);
+    state.setDiscordLastSequence(99);
+    expect(state.getDiscordLastSequence()).toBe(99);
+
+    state.setEmailLastUid(7);
+    state.setEmailLastUid(8);
+    expect(state.getEmailLastUid()).toBe(8);
   });
 });

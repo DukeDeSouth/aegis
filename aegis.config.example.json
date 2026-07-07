@@ -10,13 +10,32 @@
     {
       "id": "morning-digest",
       "cron": "07:00",
-      "text": "/search inbox",
-      "session_id": "scheduler:morning-digest"
+      "text": "/digest",
+      "session_id": "tg:YOUR_CHAT_ID"
     }
   ],
   "learning": {
     "self_improvement_llm_enabled": false,
     "min_reuse_rate": 0
+  },
+  "memory": {
+    "context": {
+      "enabled": true,
+      "dialog_tail": 10,
+      "recall_k": 3,
+      "max_tokens": 2048
+    }
+  },
+  "web": {
+    "max_response_kb": 512,
+    "cache_ttl_s": 3600,
+    "broker_host": "aegis-broker:8080"
+  },
+  "sandbox": {
+    "workspace_dir": "./workspace"
+  },
+  "mcp": {
+    "servers": []
   },
   "llm": {
     "p_llm": {
@@ -36,5 +55,13 @@
     "bot_token_ref": "AEGIS_TG_BOT_TOKEN",
     "pairing_code_ref": "AEGIS_TG_PAIRING_CODE",
     "poll_timeout_s": 30
+  },
+  "discord": {
+    "bot_token_ref": "AEGIS_DISCORD_BOT_TOKEN",
+    "pairing_code_ref": "AEGIS_DISCORD_PAIRING_CODE"
+  },
+  "email": {
+    "session_id": "email:inbox",
+    "poll_interval_s": 60
   }
 }

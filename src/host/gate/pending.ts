@@ -74,4 +74,13 @@ export class PendingStore {
       chatId: row.chat_id,
     };
   }
+
+  countActive(): number {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS c FROM pending_actions WHERE consumed = 0 AND expires_at > ?`,
+      )
+      .get(this.now()) as { c: number };
+    return row.c;
+  }
 }

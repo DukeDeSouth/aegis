@@ -75,4 +75,21 @@ describe('configSchema (ADR-0008)', () => {
     expect(parsed.learning.self_improvement_llm_enabled).toBe(false);
     expect(parsed.learning.min_reuse_rate).toBe(0);
   });
+
+  it('memory.context: defaults (Sprint 11)', () => {
+    const parsed = configSchema.parse({
+      ...validConfig,
+      memory: { context: {} },
+    });
+    expect(parsed.memory?.context.enabled).toBe(true);
+    expect(parsed.memory?.context.dialog_tail).toBe(10);
+    expect(parsed.memory?.context.recall_k).toBe(3);
+    expect(parsed.memory?.context.max_tokens).toBe(2048);
+  });
+
+  it('web: defaults (Sprint 12)', () => {
+    const parsed = configSchema.parse({ ...validConfig, web: {} });
+    expect(parsed.web?.max_response_kb).toBe(512);
+    expect(parsed.web?.broker_host).toBe('aegis-broker:8080');
+  });
 });

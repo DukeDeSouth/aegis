@@ -1,12 +1,22 @@
 /**
  * Установка навыка из git с pinned ref (owner-only, fail-closed).
  */
-import { cpSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import type { KnowledgeStore } from '../memory/knowledge.ts';
 import { SkillRegistry } from './registry.ts';
+import { findImportableSkillRoot, importExternalSkill } from './import.ts';
 import { scanRejects } from './scanner.ts';
 import { parseManifest, validateManifestFile } from './validate.ts';
 import type { InstallResult } from './types.ts';
@@ -40,7 +50,7 @@ function findSkillRoot(cloneDir: string): string {
       return p;
     }
   }
-  throw new Error('no manifest.json in clone root');
+  return findImportableSkillRoot(cloneDir);
 }
 
 export class SkillInstaller {
@@ -79,21 +89,33 @@ export class SkillInstaller {
     }
   }
 
-  /** Копирование в skills_dir + knowledge row (тесты и post-clone). */
+  /** Копирование в skills_dir + knowledge row (тесты, git, SKILL.md-only F7). */
   installFromDir(srcDir: string, skillRef: string): InstallResult {
-    const manifestPath = join(srcDir, 'manifest.json');
     const skillPath = join(srcDir, 'SKILL.md');
-    const raw = JSON.parse(readFileSync(manifestPath, 'utf8')) as unknown;
+    if (!existsSync(skillPath)) throw new Error('SKILL.md required');
+
     const skillMd = readFileSync(skillPath, 'utf8');
-    const dirName = srcDir.split('/').pop()!;
-    const validation = validateManifestFile(raw, srcDir, dirName, skillMd);
+    let manifestPath = join(srcDir, 'manifest.json');
+    let requiresReview = false;
+
+    if (!existsSync(manifestPath)) {
+      const imported = importExternalSkill(srcDir, skillMd);
+      writeFileSync(manifestPath, `${JSON.stringify(imported.manifest, null, 2)}\n`);
+      requiresReview = imported.requiresReview;
+    } else {
+      const existing = JSON.parse(readFileSync(manifestPath, 'utf8')) as { requires_review?: boolean };
+      requiresReview = existing.requires_review === true;
+    }
+
+    const raw = JSON.parse(readFileSync(manifestPath, 'utf8')) as unknown;
+    const manifest = parseManifest(raw);
+    const validation = validateManifestFile(raw, srcDir, manifest.name, skillMd);
     if (!validation.ok) {
       throw new Error(`manifest invalid: ${validation.errors.join('; ')}`);
     }
     const scanErr = scanRejects(srcDir);
     if (scanErr) throw new Error(`scanner rejected: ${scanErr}`);
 
-    const manifest = parseManifest(raw);
     const dest = join(this.skillsDir, manifest.name);
     if (statSync(dest, { throwIfNoEntry: false })) {
       rmSync(dest, { recursive: true, force: true });
@@ -106,7 +128,13 @@ export class SkillInstaller {
       body: `Skill ${manifest.name}@${manifest.version}`,
       provenance: 'owner',
       skillRef,
+      ...(requiresReview ? { epistemicStatus: 'unverified' as const } : {}),
     });
-    return { name: manifest.name, ref: skillRef, knowledgeId };
+    return {
+      name: manifest.name,
+      ref: skillRef,
+      knowledgeId,
+      ...(requiresReview ? { requiresReview: true } : {}),
+    };
   }
 }

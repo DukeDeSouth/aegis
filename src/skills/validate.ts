@@ -27,6 +27,7 @@ const manifestSchema = z
     action_class: z.enum(['read-only', 'reversible', 'irreversible']),
     code: z.boolean(),
     entrypoints: z.array(z.string().min(1)),
+    requires_review: z.boolean().optional(),
   })
   .strict();
 
