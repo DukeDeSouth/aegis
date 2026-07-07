@@ -92,4 +92,16 @@ describe('configSchema (ADR-0008)', () => {
     expect(parsed.web?.max_response_kb).toBe(512);
     expect(parsed.web?.broker_host).toBe('aegis-broker:8080');
   });
+
+  it('web.search_url: требует {query} и валидный URL (Sprint 23, C2)', () => {
+    const url = 'https://searxng.aegis/search?q={query}&format=json';
+    const parsed = configSchema.parse({ ...validConfig, web: { search_url: url } });
+    expect(parsed.web?.search_url).toBe(url);
+    expect(() =>
+      configSchema.parse({ ...validConfig, web: { search_url: 'https://x.example/no-slot' } }),
+    ).toThrow();
+    expect(() =>
+      configSchema.parse({ ...validConfig, web: { search_url: 'not-a-url-{query}' } }),
+    ).toThrow();
+  });
 });

@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { runConnector } from './connector.ts';
 import { runInit } from './init.ts';
 import { runUpgrade } from './upgrade.ts';
 import { runVerify } from './verify.ts';
@@ -7,9 +8,10 @@ function usage(): void {
   console.log(`Usage: aegis-setup [command] [options]
 
 Commands:
-  init      Interactive install (default)
-  verify    Smoke-check Node, Docker, config, broker, Telegram
-  upgrade   Show diff and update deploy templates
+  init       Interactive install (default)
+  verify     Smoke-check Node, Docker, config, broker, Telegram
+  upgrade    Show diff and update deploy templates
+  connector  list | add <name…> — install connector presets (skills + broker routes)
 
 Options:
   --dir <path>   Install directory (default: cwd)
@@ -25,6 +27,7 @@ export async function main(argv: string[]): Promise<number> {
   let dir = process.cwd();
   let force = false;
   let yes = false;
+  const positional: string[] = [];
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
@@ -45,7 +48,8 @@ export async function main(argv: string[]): Promise<number> {
       continue;
     }
     if (!a.startsWith('-')) {
-      cmd = a;
+      if (positional.length === 0) cmd = a;
+      positional.push(a);
       continue;
     }
     console.error(`Unknown option: ${a}`);
@@ -60,6 +64,8 @@ export async function main(argv: string[]): Promise<number> {
       return runVerify({ root: dir });
     case 'upgrade':
       return runUpgrade({ root: dir, force });
+    case 'connector':
+      return runConnector(dir, positional.slice(1));
     default:
       console.error(`Unknown command: ${cmd}`);
       usage();

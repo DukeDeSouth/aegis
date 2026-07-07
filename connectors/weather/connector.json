@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "name": "weather",
+  "description": "Weather forecasts via Open-Meteo (no API key) through the broker (C3)",
+  "skill": true,
+  "broker_routes": [
+    {
+      "host": "api.open-meteo.com",
+      "cluster_address": "api.open-meteo.com",
+      "cluster_port": 443,
+      "tls": true
+    }
+  ],
+  "config_hints": [
+    "optional cron briefing: { \"id\": \"weather-morning\", \"cron\": \"07:00\", \"text\": \"/fetch https://api.open-meteo.com/v1/forecast?latitude=52.52&longitude=13.41&current_weather=true\", \"session_id\": \"tg:YOUR_CHAT_ID\" }"
+  ]
+}

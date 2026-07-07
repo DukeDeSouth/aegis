@@ -17,7 +17,11 @@ import type { KnowledgeRow } from '../../memory/knowledge.ts';
 import type { PromotionGate } from '../../memory/promotion.ts';
 import type { MemoryProvenance } from '../../memory/types.ts';
 import type { KnowledgeVerifier } from '../../memory/verifier.ts';
-import { formatMetricsReport, formatStatusReport, type ReuseMetricsSnapshot } from '../../memory/metrics.ts';
+import {
+  formatMetricsReport,
+  formatStatusReport,
+  type ReuseMetricsSnapshot,
+} from '../../memory/metrics.ts';
 import type { LearningConfig } from '../../config/schema.ts';
 import type { WebCacheStore } from '../../memory/web-cache.ts';
 import { urlHash } from '../../memory/web-cache.ts';
@@ -38,11 +42,7 @@ import type { SkillCurator } from '../../skills/curator.ts';
 import type { SkillMetricsStore } from '../../skills/metrics.ts';
 import type { SkillRegistry } from '../../skills/registry.ts';
 import { parseHttpsUrlsFromMarkdown } from '../../skills/urls.ts';
-import {
-  nextFireAtUtc,
-  parseRemindCommand,
-  type ReminderStore,
-} from '../scheduler/reminders.ts';
+import { nextFireAtUtc, parseRemindCommand, type ReminderStore } from '../scheduler/reminders.ts';
 import type { BudgetEngine } from '../budget/engine.ts';
 import { IRREVERSIBLE_TEST_CMD } from '../gate/actions.ts';
 import { evaluate, type GateDeps, verdictToAuditDecision } from '../gate/engine.ts';
@@ -86,6 +86,7 @@ export interface OrchestratorOptions {
   webFetcher?: WebFetcher;
   webCache?: WebCacheStore;
   webCacheTtlS?: number;
+  searchUrl?: string;
   reminders?: ReminderStore;
   workspace?: WorkspaceStore;
   mcpServers?: readonly McpServerConfig[];
@@ -112,6 +113,7 @@ const SKILL_ACCEPT_PREFIX = '/skill-accept ';
 const SKILL_REJECT_PREFIX = '/skill-reject ';
 const SKILL_APPROVE_PREFIX = '/skill-approve ';
 const FETCH_PREFIX = '/fetch ';
+const RESEARCH_PREFIX = '/research ';
 const DIGEST_CMD = '/digest';
 const REMIND_PREFIX = '/remind ';
 const SUMMARIZE_PREFIX = '/summarize ';
@@ -189,13 +191,13 @@ export class Orchestrator {
   private readonly ownerNotifySessionId: string | undefined;
   private readonly getReuseMetrics: (() => ReuseMetricsSnapshot) | undefined;
   private readonly getSkillReuseMetrics:
-    | (() => import('../../skills/metrics.ts').SkillReuseSnapshot)
-    | undefined;
+    (() => import('../../skills/metrics.ts').SkillReuseSnapshot) | undefined;
   private readonly learning: LearningConfig | undefined;
   private readonly memoryContext: MemoryContextConfig;
   private readonly webFetcher: WebFetcher | undefined;
   private readonly webCache: WebCacheStore | undefined;
   private readonly webCacheTtlS: number;
+  private readonly searchUrl: string | undefined;
   private readonly reminders: ReminderStore | undefined;
   private readonly workspace: WorkspaceStore | undefined;
   private readonly mcpServers: readonly McpServerConfig[];
@@ -238,6 +240,7 @@ export class Orchestrator {
     this.webFetcher = opts.webFetcher;
     this.webCache = opts.webCache;
     this.webCacheTtlS = opts.webCacheTtlS ?? 3600;
+    this.searchUrl = opts.searchUrl;
     this.reminders = opts.reminders;
     this.workspace = opts.workspace;
     this.mcpServers = opts.mcpServers ?? [];
@@ -614,6 +617,11 @@ export class Orchestrator {
       return true;
     }
 
+    if (payload.text.startsWith(RESEARCH_PREFIX)) {
+      await this.handleResearch(msg.id, payload, msg.provenance);
+      return true;
+    }
+
     if (payload.text === MCP_LIST_CMD) {
       this.handleMcpList(msg.id, payload, msg.provenance);
       return true;
@@ -893,6 +901,28 @@ export class Orchestrator {
     );
   }
 
+  /** C2 (Sprint 23): /research <q> = /fetch по web.search_url — тот же quarantine-путь. */
+  private async handleResearch(
+    messageId: number,
+    payload: { text: string; session_id: string },
+    provenance: QueueProvenance,
+  ): Promise<void> {
+    const query = payload.text.slice(RESEARCH_PREFIX.length).trim();
+    if (query.length > 0 && this.searchUrl !== undefined) {
+      const text = FETCH_PREFIX + this.searchUrl.replace('{query}', encodeURIComponent(query));
+      await this.handleFetch(messageId, { ...payload, text }, provenance);
+      return;
+    }
+    const usage =
+      this.searchUrl === undefined
+        ? 'Search not configured: set web.search_url (aegis-setup connector add search)'
+        : 'Usage: /research <query>';
+    const sendGate = evaluate({ actionId: 'message.send', provenance }, this.gateDeps);
+    this.logGate('message.send', provenance, sendGate, { messageId });
+    if (sendGate.verdict === 'allow') this.publishOutbound(payload.session_id, usage);
+    this.queues.ack(messageId);
+  }
+
   private handleMcpList(
     messageId: number,
     payload: { session_id: string },
@@ -991,7 +1021,7 @@ export class Orchestrator {
   private async invokeMcpAndQuarantine(
     messageId: number,
     sessionId: string,
-    serverCfg: McpServerConfig & { transport: 'stdio' },
+    serverCfg: McpServerConfig,
     tool: string,
     args: Record<string, unknown>,
     provenance: QueueProvenance,
@@ -1331,7 +1361,9 @@ export class Orchestrator {
       reply = 'Usage: /delete-file <path>';
     } else {
       try {
-        reply = this.workspace.delete(relPath) ? `Moved ${relPath} to trash` : `Not found: ${relPath}`;
+        reply = this.workspace.delete(relPath)
+          ? `Moved ${relPath} to trash`
+          : `Not found: ${relPath}`;
       } catch (err) {
         reply = `Delete failed: ${err instanceof Error ? err.message : String(err)}`;
       }
@@ -1725,12 +1757,11 @@ export class Orchestrator {
       return;
     }
     const draft = name ? this.skillProposals.readDraft(name) : undefined;
-    const reply =
-      !name
-        ? 'Usage: /skill-review <name>'
-        : !draft
-          ? `No draft: ${name}`
-          : `${draft.skillMd}\n\n---\nAccept: /skill-accept ${name}\nReject: /skill-reject ${name}`;
+    const reply = !name
+      ? 'Usage: /skill-review <name>'
+      : !draft
+        ? `No draft: ${name}`
+        : `${draft.skillMd}\n\n---\nAccept: /skill-accept ${name}\nReject: /skill-reject ${name}`;
     const sendGate = evaluate({ actionId: 'message.send', provenance }, this.gateDeps);
     if (sendGate.verdict === 'allow') this.publishOutbound(payload.session_id, reply);
     this.queues.ack(messageId);
@@ -1742,7 +1773,13 @@ export class Orchestrator {
     provenance: QueueProvenance,
   ): void {
     const name = payload.text.slice(SKILL_ACCEPT_PREFIX.length).trim();
-    if (provenance !== 'owner' || !this.skillProposals || !this.skills || !this.knowledge || !this.promotion) {
+    if (
+      provenance !== 'owner' ||
+      !this.skillProposals ||
+      !this.skills ||
+      !this.knowledge ||
+      !this.promotion
+    ) {
       this.queues.ack(messageId);
       return;
     }
@@ -1773,7 +1810,8 @@ export class Orchestrator {
     }
     if (!name) {
       const sendGate = evaluate({ actionId: 'message.send', provenance }, this.gateDeps);
-      if (sendGate.verdict === 'allow') this.publishOutbound(payload.session_id, 'Usage: /skill-reject <name>');
+      if (sendGate.verdict === 'allow')
+        this.publishOutbound(payload.session_id, 'Usage: /skill-reject <name>');
       this.queues.ack(messageId);
       return;
     }

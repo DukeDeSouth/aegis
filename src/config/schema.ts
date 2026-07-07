@@ -98,6 +98,8 @@ export const webSchema = z
     max_response_kb: z.number().int().positive().default(512),
     cache_ttl_s: z.number().int().positive().default(3600),
     broker_host: z.string().min(1).default('aegis-broker:8080'),
+    /** C2: шаблон поиска с {query}; /research = /fetch этого URL. */
+    search_url: z.string().url().includes('{query}').optional(),
   })
   .strict();
 
@@ -117,9 +119,11 @@ export const mcpToolSchema = z
   })
   .strict();
 
-export const mcpServerSchema = z
+const mcpServerName = z.string().regex(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+
+const mcpStdioServerSchema = z
   .object({
-    name: z.string().regex(/^[a-z0-9]+(-[a-z0-9]+)*$/),
+    name: mcpServerName,
     transport: z.literal('stdio'),
     command: z.array(z.string().min(1)).min(1),
     /** Host-путь к MCP-серверу; монтируется в sandbox как /mcp-server (F8). */
@@ -128,6 +132,27 @@ export const mcpServerSchema = z
     allowed_hosts: z.array(z.string().min(1)).optional(),
   })
   .strict();
+
+/**
+ * P-A (Sprint 22): HTTP MCP через broker. Ядро шлёт POST на broker_host с
+ * `Host: host`; Authorization инжектит Envoy. Полей для токена нет по
+ * построению (strict) — V2 распространяется на HTTP MCP.
+ */
+const mcpHttpServerSchema = z
+  .object({
+    name: mcpServerName,
+    transport: z.literal('http'),
+    broker_host: z.string().min(1),
+    host: z.string().min(1),
+    path: z.string().startsWith('/').optional(),
+    tools: z.array(mcpToolSchema).min(1),
+  })
+  .strict();
+
+export const mcpServerSchema = z.discriminatedUnion('transport', [
+  mcpStdioServerSchema,
+  mcpHttpServerSchema,
+]);
 
 export const mcpSchema = z
   .object({
@@ -181,4 +206,5 @@ export type WebConfig = z.infer<typeof webSchema>;
 export type SandboxConfig = z.infer<typeof sandboxSchema>;
 export type McpConfig = z.infer<typeof mcpSchema>;
 export type McpServerConfig = z.infer<typeof mcpServerSchema>;
-export type McpStdioServerConfig = McpServerConfig;
+export type McpStdioServerConfig = z.infer<typeof mcpStdioServerSchema>;
+export type McpHttpServerConfig = z.infer<typeof mcpHttpServerSchema>;

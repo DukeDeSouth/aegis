@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "name": "notes",
+  "description": "Markdown notes in the sandbox workspace (Obsidian-compatible vault) (C7)",
+  "skill": true,
+  "broker_routes": [],
+  "config_hints": [
+    "notes live in sandbox.workspace_dir (default data/workspace) — point Obsidian at that folder for a shared vault"
+  ]
+}

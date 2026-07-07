@@ -115,7 +115,10 @@ describe.skipIf(!hasDocker)('V3: побег из sandbox невозможен', 
     });
     const r = await wsRunner.run(
       skillDir,
-      skill('ws.sh', 'echo WS_OK > /workspace/out.txt && touch /skill/x; echo SKILL_TOUCH=$?'),
+      skill(
+        'ws.sh',
+        'echo WS_OK > /workspace/out.txt && cat /workspace/out.txt && touch /skill/x; echo SKILL_TOUCH=$?',
+      ),
       limits(),
     );
     expect(r.stdout).toContain('WS_OK');

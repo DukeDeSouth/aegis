@@ -13,5 +13,6 @@
 | [0007](0007-skill-manifest-format.md)             | Формат capability-манифеста навыка                | Accepted |
 | [0008](0008-llm-provider-abstraction.md)          | LLM: OpenAI-совместимый протокол, тонкий клиент   | Accepted |
 | [0009](0009-post-mvp-core-loc-budget.md)          | Post-MVP LOC порог 5000 (Sprint 11–12)            | Accepted |
+| [0010](0010-oauth-refresh-sidecar.md)             | OAuth-refresh sidecar в trust-домене broker       | Accepted |
 
 Новые ADR нумеруются по порядку. Решение не удаляется, а помечается `Superseded by NNNN`.

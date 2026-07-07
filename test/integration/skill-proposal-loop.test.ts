@@ -48,14 +48,23 @@ describe('skill proposal loop (F5)', () => {
     const knowledge = new KnowledgeStore(memoryDb, { now: () => NOW });
     const promotion = new PromotionGate(memoryDb, { now: () => NOW });
     const snapshot = new MemorySnapshot(memoryDb, join(root, 'mem.db'), join(root, 'snap'));
-    const curation = new CurationRunner(memoryDb, knowledge, promotion, snapshot, { now: () => NOW });
+    const curation = new CurationRunner(memoryDb, knowledge, promotion, snapshot, {
+      now: () => NOW,
+    });
     const registry = new SkillRegistry(skillsDir);
-    const proposals = new SkillProposalRunner(memoryDb, episodes, {
-      self_improvement_llm_enabled: false,
-      min_reuse_rate: 0,
-      skill_proposal_threshold: 3,
-      skill_proposal_window_days: 14,
-    }, { skillsDir, threshold: 3, now: () => NOW });
+    const proposals = new SkillProposalRunner(
+      memoryDb,
+      episodes,
+      {
+        self_improvement_llm_enabled: false,
+        min_reuse_rate: 0,
+        skill_proposal_threshold: 3,
+        skill_proposal_window_days: 14,
+        skill_curator_stale_days: 30,
+        skill_curator_min_success_rate: 0.5,
+      },
+      { skillsDir, threshold: 3, now: () => NOW },
+    );
 
     const queues = new QueueStore(queueDb, { visibilityTimeoutMs: 30_000, now: () => NOW });
     const audit = new AuditLog(auditDb, { now: () => NOW });
@@ -64,7 +73,7 @@ describe('skill proposal loop (F5)', () => {
       complete(): Promise<LlmResult> {
         return Promise.resolve({
           message: { role: 'assistant', content: 'ok' },
-          usage: { promptTokens: 1, completionTokens: 1 },
+          usage: { promptTokens: 1, completionTokens: 1, estimated: false },
         });
       },
     };

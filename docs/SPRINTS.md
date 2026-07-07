@@ -324,6 +324,72 @@
 
 ---
 
+## Sprint 22 — MCP через broker: HTTP-транспорт (Connectors, P-A)
+
+**Цель:** MCP-серверы подключаются по HTTP через broker; токены инжектит Envoy, ядро и sandbox их не видят.
+
+**Спека:** [`CONNECTORS.md`](CONNECTORS.md) § P-A | хвост F8 ([`POST_MVP_FEATURES.md`](POST_MVP_FEATURES.md) § F8)
+
+- [x] `mcpServerSchema`: discriminated union `stdio` | `http` (`broker_host` + `host` + `path`) (S)
+- [x] `HttpMcpClient` в `src/mcp/http-transport.ts` — Streamable HTTP (initialize → initialized → tools/call, `Mcp-Session-Id` echo), Host-паттерн web-fetch, без auth-параметров в принципе (M)
+- [x] `HttpMcpRunner` + `DelegatingMcpRunner` ветвится по transport; gate `mcp.<server>.<tool>` без изменений (S)
+- [x] Broker-шаблон: virtual_host + cluster для MCP-апстрима (deploy + aegis-setup templates, идентичны) (M)
+- [x] Security: V2/V8-расширение — strict schema отклоняет `token`/`headers`; клиент не шлёт auth-заголовков (негативный тест на захваченных заголовках); injection в HTTP-ответе → V1-путь (M)
+
+**DoD:** `/mcp` к HTTP-серверу работает end-to-end через broker-паттерн; конфиг с токеном отклоняется схемой; V1/V2/V8-расширения зелёные; e2e `test/integration/mcp-http-loop.test.ts`. 259 тестов + security 23/23; LOC 7467/7500. **Sprint 22 закрыт.**
+
+---
+
+## Sprint 23 — Каталог коннекторов: волна без OAuth (C2, C3, C6, C7)
+
+**Цель:** формат `connectors/` + `aegis-setup connector add`; поиск, погода, RSS, workspace-заметки из коробки.
+
+**Спека:** [`CONNECTORS.md`](CONNECTORS.md) § P-C, C2, C3, C6, C7
+
+- [x] Формат пресета `connectors/<name>/` (connector.json + SKILL.md + manifest.json; broker-маршруты декларативно в connector.json) (M)
+- [x] `aegis-setup connector add|list` — установка навыка + идемпотентная вставка envoy-маршрутов (маркер `# connector:<name>`), config_hints (M)
+- [x] C2: SearXNG-пресет + `/research <q>` в ядре — rewrite в `/fetch` по `web.search_url` (`{query}`-шаблон), тот же SSRF/cache/quarantine-путь (M)
+- [x] C3: погода — декларативный навык на `web.fetch` (Open-Meteo, без ключа), TLS-маршрут через broker (S)
+- [x] C6: RSS/Atom-выжимка (`title — link`) в `skills/web-fetch/fetch.sh` (sandbox, не ядро); источники в SKILL.md (M)
+- [x] C7: заметки в workspace — декларативный навык `network:none` поверх `/read`, `/write`, `/undo-file` (S)
+- [x] `verify`: проверка `connector-routes` (unpaired marker / route без cluster → FAIL)
+- [x] Тесты: `connector.test.ts` (add/list/идемпотентность/битый маршрут), `connector-presets.test.ts` (манифесты по ADR-0007), `web-fetch-script.test.ts` (HTML/RSS/Atom), e2e `research-loop.test.ts` (V1-инъекция в результатах поиска)
+
+**DoD:** `aegis-setup connector add weather search rss` ставит навыки + маршруты идемпотентно; `/research` работает end-to-end через quarantine; ни одного нового gate-класса; `verify` ловит битый маршрут. 272 теста + security 23/23; aegis-setup 12; LOC 7500/7500 (ровно бюджет). **Sprint 23 закрыт.**
+
+---
+
+## Sprint 24 — OAuth у broker + Google Workspace (P-B, C1)
+
+**Цель:** OAuth-refresh sidecar в trust-домене broker; Gmail + Calendar end-to-end; «утренний брифинг».
+
+**Спека:** [`CONNECTORS.md`](CONNECTORS.md) § P-B, C1
+
+- [x] ADR-0010: OAuth-refresh sidecar — свой мини-процесс ~90 строк stdlib (готовые кандидаты — downstream-auth либо требуют креды себе) (M)
+- [x] Sidecar `deploy/broker/oauth-sidecar/sidecar.mjs`: refresh-token в файле только у sidecar → access-token в SDS-yaml атомарно (tmp+rename, hot-reload Envoy без рестарта); retry/backoff, ONE_SHOT для тестов (L)
+- [x] C1-пресет `connectors/google/`: свой тонкий stdio-MCP `server/server.mjs` в sandbox (7 tools; list/get/search/calendar_list — read-only; draft/calendar_create — reversible; send — irreversible → `/approve`); отдельный listener :8081 с собственным SDS-секретом (`broker_listener` в connector.json, вставка по якорю `listeners:` c маркером `# connector:google listener`) (M)
+- [x] Брифинг: композиция C1+C3+C6+reminders cron-hints в `connector add google` + процедура в SKILL.md — ноль кода ядра (S)
+- [x] Security: V2/OAuth — strict-схема ядра отвергает поля токенов; код server/sidecar не выставляет Authorization и не логирует токены; e2e-assert «запрос к broker без кредов» (M)
+
+**DoD:** `/mcp google calendar_list` («что у меня сегодня») и `/approve`-отправка письма работают e2e с фейковым Google API; sidecar против фейкового token-endpoint; merged envoy.yaml (weather+search+google) прошёл `envoy --mode validate` v1.37.1; ядро не тронуто — LOC 7500/7500. 289 тестов + security 25/25 + aegis-setup 16; typecheck ядра чист (попутно вылечен долг: `estimated`/learning-поля в старых тестах, `requires_review` exactOptionalPropertyTypes). **Sprint 24 закрыт.**
+
+---
+
+## Sprint 25 — Home Assistant + GitHub (C4, C5)
+
+**Цель:** два коннектора с эталонной градуировкой классов.
+
+**Спека:** [`CONNECTORS.md`](CONNECTORS.md) § C4, C5
+
+- [ ] C4: HA-пресет — get_state read-only; свет/климат reversible; замки/сигнализация irreversible → `/approve` (M)
+- [ ] C5: GitHub-пресет — чтение read-only; issue/comment reversible; merge/close irreversible (M)
+- [ ] Long-lived токены (HA, fine-grained PAT) в секрет-файле broker (S)
+- [ ] Security: unlock без `/approve` невозможен (негативный тест); injection из issue-текста → V1 (M)
+
+**DoD:** оба пресета ставятся через `connector add`; unlock-негатив зелёный; e2e на каждый коннектор.
+
+---
+
 ## После MVP (бэклог)
 
 Спринты 17+ — см. [`POST_MVP_FEATURES.md`](POST_MVP_FEATURES.md) (F7–F11).
@@ -357,5 +423,9 @@
 | 19     | Post-MVP F9: aegis-setup      |                  |
 | 20     | Post-MVP F10: Discord + email |                  |
 | 21     | Post-MVP F11: dashboard       |                  |
+| 22     | Connectors P-A: MCP через broker (HTTP) |        |
+| 23     | Connectors: волна без OAuth (C2/C3/C6/C7) |      |
+| 24     | Connectors: OAuth sidecar + Google (C1) |        |
+| 25     | Connectors: Home Assistant + GitHub (C4/C5) |    |
 
 Ориентир: ~10 спринтов ≈ 20 недель до MVP для команды 1–3 человека. Оценки уточняются после Sprint 0.

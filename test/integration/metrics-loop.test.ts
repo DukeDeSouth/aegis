@@ -83,7 +83,14 @@ describe('metrics loop (e2e, Sprint 10)', () => {
       new PendingStore(w.queueDb),
       {
         getReuseMetrics: () => computeReuseMetrics(w.memoryDb),
-        learning: { self_improvement_llm_enabled: false, min_reuse_rate: 0 },
+        learning: {
+          self_improvement_llm_enabled: false,
+          min_reuse_rate: 0,
+          skill_proposal_threshold: 3,
+          skill_proposal_window_days: 14,
+          skill_curator_stale_days: 30,
+          skill_curator_min_success_rate: 0.5,
+        },
       },
     ).processOne();
 
@@ -112,7 +119,14 @@ describe('metrics loop (e2e, Sprint 10)', () => {
     await new Orchestrator(w.queues, w.audit, llm, new PendingStore(w.queueDb), {
       getReuseMetrics: () => computeReuseMetrics(w.memoryDb),
       ownerNotifySessionId: 'tg:99',
-      learning: { self_improvement_llm_enabled: false, min_reuse_rate: 0 },
+      learning: {
+        self_improvement_llm_enabled: false,
+        min_reuse_rate: 0,
+        skill_proposal_threshold: 3,
+        skill_proposal_window_days: 14,
+        skill_curator_stale_days: 30,
+        skill_curator_min_success_rate: 0.5,
+      },
       gateDeps: { brokerAvailable: true, gateHealthy: true },
     }).processOne();
 

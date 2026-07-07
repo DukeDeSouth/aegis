@@ -170,7 +170,8 @@
 
 **Критерий готовности.** Один реальный MCP-сервер работает end-to-end через gate + broker; все три security-расширения зелёные.
 
-**Статус (Sprint 18):** stdio MCP в **sandbox** (`skills/mcp-stdio-bridge`, `server_dir` mount), gate `mcp.*`, irreversible → `/approve`, `/mcp` + quarantine `mcp`; V1 injection + V8 env isolation. HTTP/broker transport и broker token injection — следующий шаг.
+**Статус (Sprint 18):** stdio MCP в **sandbox** (`skills/mcp-stdio-bridge`, `server_dir` mount), gate `mcp.*`, irreversible → `/approve`, `/mcp` + quarantine `mcp`; V1 injection + V8 env isolation.
+**Статус (Sprint 22):** HTTP-транспорт через broker реализован — `transport: 'http'` (`broker_host`+`host`), `HttpMcpClient` без auth-параметров по построению, токен инжектит Envoy (`credential_injector`); V2/V8-расширения. См. `CONNECTORS.md` § P-A.
 
 ---
 

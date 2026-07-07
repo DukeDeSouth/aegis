@@ -39,6 +39,16 @@ static_resources:
                           route:
                             cluster: llm
                             host_rewrite_literal: api.openai.com
+                    # Пример: HTTP MCP-сервер (Sprint 22, CONNECTORS.md P-A).
+                    # Ядро шлёт POST /mcp с Host: mcp.example.com; токен
+                    # инжектится здесь же (credential_injector ниже общий).
+                    # - name: mcp-example
+                    #   domains: ['mcp.example.com', 'mcp.example.com:*']
+                    #   routes:
+                    #     - match: { prefix: '/' }
+                    #       route:
+                    #         cluster: mcp-example
+                    #         host_rewrite_literal: mcp.example.com
                   # Ничего не совпало → 404: маршрута нет по построению.
                 http_filters:
                   - name: envoy.filters.http.credential_injector
@@ -59,6 +69,21 @@ static_resources:
                     typed_config:
                       '@type': type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
   clusters:
+    # Кластер для HTTP MCP-сервера — по образцу llm (TLS origination у брокера):
+    # - name: mcp-example
+    #   type: STRICT_DNS
+    #   transport_socket:
+    #     name: envoy.transport_sockets.tls
+    #     typed_config:
+    #       '@type': type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+    #       sni: mcp.example.com
+    #   load_assignment:
+    #     cluster_name: mcp-example
+    #     endpoints:
+    #       - lb_endpoints:
+    #           - endpoint:
+    #               address:
+    #                 socket_address: { address: mcp.example.com, port_value: 443 }
     - name: llm
       type: STRICT_DNS
       # Брокер сам устанавливает TLS к апстриму: sandbox не делает https и не

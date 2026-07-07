@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "name": "rss",
+  "description": "RSS/Atom feeds as digest sources; feed XML is distilled in the sandbox (C6)",
+  "skill": true,
+  "broker_routes": [
+    {
+      "host": "hnrss.org",
+      "cluster_address": "hnrss.org",
+      "cluster_port": 443,
+      "tls": true
+    }
+  ],
+  "config_hints": [
+    "add feed URLs to skills/rss/SKILL.md (one https URL per line under Sources)",
+    "each feed host needs a broker route: rerun `aegis-setup connector add rss` after editing connectors/rss/connector.json, or copy the mcp-example block in deploy/broker/envoy.yaml",
+    "cron digest: { \"id\": \"rss-digest\", \"cron\": \"07:30\", \"text\": \"/digest\", \"session_id\": \"tg:YOUR_CHAT_ID\" }"
+  ]
+}

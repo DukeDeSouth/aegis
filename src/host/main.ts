@@ -44,7 +44,7 @@ import { SkillCurator } from '../skills/curator.ts';
 import { WorkspaceStore } from './workspace.ts';
 import { loadMcpRegistry } from '../mcp/registry.ts';
 import { DelegatingMcpRunner, SandboxMcpRunner } from '../mcp/sandbox-runner.ts';
-import { StdioMcpRunner } from '../mcp/runner.ts';
+import { HttpMcpRunner, StdioMcpRunner } from '../mcp/runner.ts';
 
 function loadConfig(): ReturnType<typeof configSchema.parse> {
   const path = process.env.AEGIS_CONFIG ?? './aegis.config.json';
@@ -56,14 +56,12 @@ function migrationSql(name: string): string {
   return readFileSync(new URL(`../../migrations/${name}`, import.meta.url), 'utf8');
 }
 
-function memoryContextFromJson(
-  raw?: {
-    enabled: boolean;
-    dialog_tail: number;
-    recall_k: number;
-    max_tokens: number;
-  },
-): MemoryContextConfig {
+function memoryContextFromJson(raw?: {
+  enabled: boolean;
+  dialog_tail: number;
+  recall_k: number;
+  max_tokens: number;
+}): MemoryContextConfig {
   if (!raw) return DEFAULT_MEMORY_CONTEXT;
   return {
     enabled: raw.enabled,
@@ -162,6 +160,7 @@ async function main(): Promise<void> {
       ? new DelegatingMcpRunner(
           new SandboxMcpRunner(sandbox, { image: mcpNodeImage }),
           new StdioMcpRunner(),
+          new HttpMcpRunner(),
         )
       : undefined;
   const budget = config.budget
@@ -190,6 +189,7 @@ async function main(): Promise<void> {
     webFetcher,
     webCache,
     webCacheTtlS: webCfg.cache_ttl_s,
+    ...(webCfg.search_url !== undefined ? { searchUrl: webCfg.search_url } : {}),
     reminders,
     workspace,
     mcpServers,
@@ -250,11 +250,7 @@ async function main(): Promise<void> {
   audit.append({ actor: 'host', action: 'host.started', decision: 'info' });
   console.log(`aegis host started (data: ${config.data_dir}); orchestrator + adapters`);
 
-  const runners = [
-    orchestrator.run(ac.signal),
-    adapter.run(ac.signal),
-    scheduler.run(ac.signal),
-  ];
+  const runners = [orchestrator.run(ac.signal), adapter.run(ac.signal), scheduler.run(ac.signal)];
   if (discordAdapter) runners.push(discordAdapter.run(ac.signal));
   if (emailAdapter) runners.push(emailAdapter.run(ac.signal));
   await Promise.all(runners);

@@ -31,6 +31,25 @@ services:
       # Сырой секрет монтируется ТОЛЬКО брокеру (тест V2).
       - ${AEGIS_BROKER_SECRET_FILE}:/etc/broker/token.txt:ro
 
+  # OAuth-refresh sidecar (ADR-0010, Sprint 24): раскомментируйте для connector
+  # google. Refresh-token видит ТОЛЬКО этот контейнер; broker читает готовый
+  # SDS-файл из shared-volume (ro). Bootstrap: broker/oauth-sidecar/README.md.
+  # oauth-sidecar:
+  #   # Закрепите digest перед продом: docker inspect --format='{{index .RepoDigests 0}}' node:24-alpine
+  #   image: node:24-alpine
+  #   restart: unless-stopped
+  #   command: ['node', '/app/sidecar.mjs']
+  #   networks: [aegis-egress]
+  #   environment:
+  #     OAUTH_CREDS_FILE: /etc/oauth/google-oauth.json
+  #     OAUTH_SDS_OUT: /etc/broker-oauth/google-secret.yaml
+  #   volumes:
+  #     - ./broker/oauth-sidecar/sidecar.mjs:/app/sidecar.mjs:ro
+  #     - ./broker/google-oauth.json:/etc/oauth/google-oauth.json:ro
+  #     - broker-oauth:/etc/broker-oauth
+  # ...и добавьте брокеру ro-mount той же volume:
+  #     - broker-oauth:/etc/broker/oauth:ro
+
   # Пример локального LLM-провайдера (ADR-0008): опционально
   # ollama:
   #   image: ollama/ollama
@@ -43,3 +62,4 @@ networks:
 
 volumes:
   aegis-data:
+  # broker-oauth: # раскомментируйте вместе с oauth-sidecar

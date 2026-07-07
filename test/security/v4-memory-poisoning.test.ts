@@ -17,6 +17,7 @@ import { UNTRUSTED_BLOCK_HEADER } from '../../src/memory/context.ts';
 import { KnowledgeStore } from '../../src/memory/knowledge.ts';
 import { PromotionGate } from '../../src/memory/promotion.ts';
 import { KnowledgeVerifier } from '../../src/memory/verifier.ts';
+import { SkillRegistry } from '../../src/skills/registry.ts';
 
 const tmp = mkdtempSync(join(tmpdir(), 'aegis-v4-'));
 afterAll(() => rmSync(tmp, { recursive: true, force: true }));

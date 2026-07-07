@@ -118,7 +118,14 @@ describe('budget loop (e2e, V7 / Sprint 9)', () => {
       budget: w.budget,
       ownerNotifySessionId: 'tg:99',
       maxTokens: 100,
-      learning: { self_improvement_llm_enabled: true, min_reuse_rate: 0 },
+      learning: {
+        self_improvement_llm_enabled: true,
+        min_reuse_rate: 0,
+        skill_proposal_threshold: 3,
+        skill_proposal_window_days: 14,
+        skill_curator_stale_days: 30,
+        skill_curator_min_success_rate: 0.5,
+      },
     }).processOne();
 
     expect(called).toBe(true);

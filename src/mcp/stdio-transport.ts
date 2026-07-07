@@ -33,7 +33,7 @@ interface JsonRpcResponse {
   error?: { code: number; message: string };
 }
 
-function extractTextContent(result: unknown): McpToolCallResult {
+export function extractTextContent(result: unknown): McpToolCallResult {
   if (!result || typeof result !== 'object') {
     return { content: JSON.stringify(result), isError: false };
   }

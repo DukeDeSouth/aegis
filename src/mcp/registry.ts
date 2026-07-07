@@ -6,9 +6,10 @@ import type { McpConfig, McpServerConfig } from '../config/schema.ts';
 
 const SERVER_NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
-function assertStdioServer(s: McpServerConfig): asserts s is McpServerConfig & { transport: 'stdio' } {
-  if (s.transport !== 'stdio') throw new Error(`unsupported mcp transport: ${s.transport}`);
-  if (s.command.length === 0) throw new Error(`mcp server ${s.name}: empty command`);
+function assertTransport(s: McpServerConfig): void {
+  if (s.transport === 'stdio' && s.command.length === 0) {
+    throw new Error(`mcp server ${s.name}: empty command`);
+  }
 }
 
 export function loadMcpRegistry(config: McpConfig | undefined): McpServerConfig[] {
@@ -24,7 +25,7 @@ export function loadMcpRegistry(config: McpConfig | undefined): McpServerConfig[
     }
     if (seen.has(server.name)) throw new Error(`duplicate mcp server: ${server.name}`);
     seen.add(server.name);
-    assertStdioServer(server);
+    assertTransport(server);
 
     const toolNames = new Set<string>();
     for (const tool of server.tools) {
@@ -43,10 +44,8 @@ export function loadMcpRegistry(config: McpConfig | undefined): McpServerConfig[
 export function findMcpServer(
   servers: readonly McpServerConfig[],
   name: string,
-): (McpServerConfig & { transport: 'stdio' }) | undefined {
-  const s = servers.find((x) => x.name === name);
-  if (!s || s.transport !== 'stdio') return undefined;
-  return s;
+): McpServerConfig | undefined {
+  return servers.find((x) => x.name === name);
 }
 
 export function isMcpToolMapped(

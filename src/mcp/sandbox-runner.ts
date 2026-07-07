@@ -22,6 +22,12 @@ export interface SandboxMcpRunnerOptions {
 
 type StdioServer = McpServerConfig & { transport: 'stdio' };
 
+function assertStdio(server: McpServerConfig): asserts server is StdioServer {
+  if (server.transport !== 'stdio') {
+    throw new Error(`mcp ${server.name}: sandbox runner got ${server.transport}`);
+  }
+}
+
 function containerCommand(server: StdioServer): string[] {
   const { command, server_dir: serverDir } = server;
   if (serverDir === undefined) {
@@ -43,7 +49,8 @@ export class SandboxMcpRunner implements McpRunner {
     this.image = opts.image;
   }
 
-  async call(server: StdioServer, tool: string, args: Record<string, unknown>): Promise<string> {
+  async call(server: McpServerConfig, tool: string, args: Record<string, unknown>): Promise<string> {
+    assertStdio(server);
     if (server.server_dir === undefined) {
       throw new Error(`mcp server ${server.name}: server_dir required`);
     }
@@ -77,14 +84,22 @@ export class SandboxMcpRunner implements McpRunner {
   }
 }
 
-/** Host stdio для тестов без Docker; production — SandboxMcpRunner. */
+/**
+ * Маршрутизация по транспорту: http → broker-клиент; stdio+server_dir → sandbox;
+ * host stdio (direct) — только для тестов без Docker.
+ */
 export class DelegatingMcpRunner implements McpRunner {
   constructor(
     private readonly sandbox: McpRunner,
     private readonly direct: McpRunner,
+    private readonly http?: McpRunner,
   ) {}
 
-  async call(server: StdioServer, tool: string, args: Record<string, unknown>): Promise<string> {
+  async call(server: McpServerConfig, tool: string, args: Record<string, unknown>): Promise<string> {
+    if (server.transport === 'http') {
+      if (!this.http) throw new Error(`mcp ${server.name}: http runner not configured`);
+      return this.http.call(server, tool, args);
+    }
     if (server.server_dir !== undefined) return this.sandbox.call(server, tool, args);
     return this.direct.call(server, tool, args);
   }

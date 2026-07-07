@@ -8,6 +8,7 @@ import {
   parseEnvFile,
   type ExecFn,
 } from './checks.ts';
+import { checkEnvoyRoutes } from './connector.ts';
 import { readText, resolveInstallPaths } from './fs.ts';
 
 export interface VerifyOptions {
@@ -54,6 +55,11 @@ export async function runVerify(opts: VerifyOptions): Promise<number> {
     detail: brokerYaml ? 'envoy.yaml present' : 'missing deploy/broker/envoy.yaml',
   });
 
+  if (brokerYaml) {
+    const routes = checkEnvoyRoutes(readText(paths.brokerEnvoy) ?? '');
+    results.push({ name: 'connector-routes', ok: routes.ok, detail: routes.detail });
+  }
+
   if (composeOk) {
     const broker = await checkBrokerRunning(join(paths.root, 'deploy'), exec);
     if ('skipped' in broker && broker.skipped) {
@@ -78,7 +84,11 @@ export async function runVerify(opts: VerifyOptions): Promise<number> {
       detail: tg.ok ? 'getMe ok' : tg.reason,
     });
   } else {
-    results.push({ name: 'telegram', ok: false, detail: 'AEGIS_TG_BOT_TOKEN not set in .env.aegis' });
+    results.push({
+      name: 'telegram',
+      ok: false,
+      detail: 'AEGIS_TG_BOT_TOKEN not set in .env.aegis',
+    });
   }
 
   let failed = 0;

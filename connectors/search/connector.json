@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "name": "search",
+  "description": "Web search via self-hosted SearXNG through the credential broker (C2)",
+  "skill": true,
+  "broker_routes": [
+    {
+      "host": "searxng.aegis",
+      "cluster_address": "searxng",
+      "cluster_port": 8080,
+      "tls": false
+    }
+  ],
+  "config_hints": [
+    "aegis.config.json → web.search_url: \"https://searxng.aegis/search?q={query}&format=json\"",
+    "docker compose: add a pinned searxng/searxng service on the aegis-egress network (see connectors/search/SKILL.md)"
+  ]
+}

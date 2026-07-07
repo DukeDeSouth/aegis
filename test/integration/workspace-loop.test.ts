@@ -49,7 +49,7 @@ describe('workspace loop (F4)', () => {
       complete(): Promise<LlmResult> {
         return Promise.resolve({
           message: { role: 'assistant', content: 'ok' },
-          usage: { promptTokens: 1, completionTokens: 1 },
+          usage: { promptTokens: 1, completionTokens: 1, estimated: false },
         });
       },
     };

@@ -72,12 +72,12 @@ function makeWorld(skillsDir: string) {
       if (user.includes('Summarize')) {
         return Promise.resolve({
           message: { role: 'assistant', content: 'Summary: alpha launch mentioned.' },
-          usage: { promptTokens: 10, completionTokens: 5 },
+          usage: { promptTokens: 10, completionTokens: 5, estimated: false },
         });
       }
       return Promise.resolve({
         message: { role: 'assistant', content: 'Digest summary.' },
-        usage: { promptTokens: 10, completionTokens: 5 },
+        usage: { promptTokens: 10, completionTokens: 5, estimated: false },
       });
     },
   };
@@ -85,7 +85,7 @@ function makeWorld(skillsDir: string) {
     complete(): Promise<LlmResult> {
       return Promise.resolve({
         message: { role: 'assistant', content: 'Safe digest excerpt.' },
-        usage: { promptTokens: 5, completionTokens: 3 },
+        usage: { promptTokens: 5, completionTokens: 3, estimated: false },
       });
     },
   };

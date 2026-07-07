@@ -35,7 +35,7 @@ export interface SkillManifest {
   code: boolean;
   entrypoints: string[];
   /** F7: внешний импорт — не в prompt до /skill-approve. */
-  requires_review?: boolean;
+  requires_review?: boolean | undefined;
 }
 
 export interface SkillSummary {

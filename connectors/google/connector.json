@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "name": "google",
+  "description": "Gmail + Google Calendar via OAuth sidecar and dedicated broker listener :8081 (C1)",
+  "skill": true,
+  "broker_routes": [],
+  "broker_listener": {
+    "port": 8081,
+    "secret_name": "google_token",
+    "sds_path": "/etc/broker/oauth/google-secret.yaml",
+    "routes": [
+      {
+        "host": "gmail.googleapis.com",
+        "cluster_address": "gmail.googleapis.com",
+        "cluster_port": 443,
+        "tls": true
+      },
+      {
+        "host": "www.googleapis.com",
+        "cluster_address": "www.googleapis.com",
+        "cluster_port": 443,
+        "tls": true
+      }
+    ]
+  },
+  "config_hints": [
+    "mcp server for aegis.config.json → mcp.servers: { \"name\": \"google\", \"transport\": \"stdio\", \"command\": [\"node\", \"server.mjs\"], \"server_dir\": \"./connectors/google/server\", \"allowed_hosts\": [\"aegis-broker\"], \"tools\": [ {\"name\": \"gmail_list\", \"action_class\": \"read-only\"}, {\"name\": \"gmail_search\", \"action_class\": \"read-only\"}, {\"name\": \"gmail_get\", \"action_class\": \"read-only\"}, {\"name\": \"gmail_draft\", \"action_class\": \"reversible\"}, {\"name\": \"gmail_send\", \"action_class\": \"irreversible\"}, {\"name\": \"calendar_list\", \"action_class\": \"read-only\"}, {\"name\": \"calendar_create\", \"action_class\": \"reversible\"} ] }",
+    "oauth sidecar: uncomment the oauth-sidecar service in deploy/docker-compose.yml and create deploy/broker/google-oauth.json (bootstrap: deploy/broker/oauth-sidecar/README.md)",
+    "morning briefing cron: { \"id\": \"briefing-calendar\", \"cron\": \"07:00\", \"text\": \"/mcp google calendar_list {}\", \"session_id\": \"tg:YOUR_CHAT_ID\" } — combine with weather/rss entries (connector add weather rss)"
+  ]
+}
