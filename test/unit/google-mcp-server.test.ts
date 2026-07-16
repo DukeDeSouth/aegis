@@ -93,6 +93,24 @@ describe('google MCP server (C1)', () => {
     expect(seen[0]!.url).toContain('q=from%3Aboss%20is%3Aunread');
   });
 
+  it('gmail_get: MIME encoded-word в Subject', async () => {
+    const { port } = await startFakeBroker(() => ({
+      status: 200,
+      json: {
+        snippet: 'body',
+        payload: {
+          headers: [
+            { name: 'From', value: 'a@b.c' },
+            { name: 'Subject', value: '=?UTF-8?B?0J/RgNC40LLQtdGC?=' },
+            { name: 'Date', value: 'Tue' },
+          ],
+        },
+      },
+    }));
+    const result = await client(port).callTool('gmail_get', { id: 'm1' });
+    expect(result.content).toContain('Subject: Привет');
+  });
+
   it('gmail_get: заголовки и snippet', async () => {
     const { port } = await startFakeBroker(() => ({
       status: 200,
@@ -160,5 +178,25 @@ describe('google MCP server (C1)', () => {
     const result = await c.callTool('gmail_list', {});
     expect(result.isError).toBe(true);
     expect(result.content).toContain('broker unreachable');
+  });
+
+  it('drive_list: Host www.googleapis.com, files listed', async () => {
+    const { port, seen } = await startFakeBroker(() => ({
+      status: 200,
+      json: { files: [{ id: 'f1', name: 'notes.txt', mimeType: 'text/plain' }] },
+    }));
+    const result = await client(port).callTool('drive_list', {});
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain('f1: notes.txt');
+    expect(seen[0]!.url).toContain('/drive/v3/files');
+  });
+
+  it('drive_get_text: raw body returned', async () => {
+    const { port } = await startFakeBroker((_req, _body) => ({
+      status: 200,
+      json: 'hello drive',
+    }));
+    const result = await client(port).callTool('drive_get_text', { id: 'f1' });
+    expect(result.content).toContain('hello drive');
   });
 });

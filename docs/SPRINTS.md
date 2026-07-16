@@ -381,12 +381,82 @@
 
 **Спека:** [`CONNECTORS.md`](CONNECTORS.md) § C4, C5
 
-- [ ] C4: HA-пресет — get_state read-only; свет/климат reversible; замки/сигнализация irreversible → `/approve` (M)
-- [ ] C5: GitHub-пресет — чтение read-only; issue/comment reversible; merge/close irreversible (M)
-- [ ] Long-lived токены (HA, fine-grained PAT) в секрет-файле broker (S)
-- [ ] Security: unlock без `/approve` невозможен (негативный тест); injection из issue-текста → V1 (M)
+- [x] C4: HA-пресет — get_state read-only; свет/климат reversible; замки/сигнализация irreversible → `/approve` (M)
+- [x] C5: GitHub-пресет — чтение read-only; issue/comment reversible; merge/close irreversible (M)
+- [x] Long-lived токены (HA, fine-grained PAT) в секрет-файле broker (S)
+- [x] Security: unlock без `/approve` невозможен (негативный тест); injection из issue-текста → V1 (M)
 
 **DoD:** оба пресета ставятся через `connector add`; unlock-негатив зелёный; e2e на каждый коннектор.
+
+---
+
+## Sprint 26 — Бытовые фичи и хвосты (C8, IMAP, connector upgrade)
+
+**Цель:** закрыть «пищат юзеры»-разрывы, которые дёшевы на готовых рельсах, и хвосты волны 1.
+
+**Спека:** [`CONNECTORS.md`](CONNECTORS.md) § C8, P-C | хвост F10 ([`POST_MVP_FEATURES.md`](POST_MVP_FEATURES.md) § F10)
+
+- [x] C8: price tracker / мониторинг страниц — детерминированный diff в sandbox-скрипте `watch.sh` (сравнение с workspace snapshot), пресет `connectors/watch` + cron-hint; `/watch` в ядре (ADR-0012); «страница изменилась / цена ниже порога → уведомление» (M)
+- [x] IMAP-fetcher для email-канала: `deploy/broker/imap-bridge/` + `BrokerHttpEmailFetcher`; wiring в `main.ts`; ADR-0012 LOC 7650 (L)
+- [x] `aegis-setup connector upgrade` — переустановка пресета с diff (маркерные блоки envoy заменяются, навык обновляется, `verify` после) (M)
+- [x] `verify`: smoke-проверка живого broker — «401 без креда на OAuth-listener, 404 на неизвестный Host» (опционально, если broker поднят) (S)
+- [x] Onboarding самообучения: `aegis-setup init`/README явно подсказывают включить `learning.self_improvement_llm_enabled` — иначе главный дифференциатор (F5) молчит по умолчанию (S)
+- [x] MIME encoded-words (не-ASCII темы) в `connectors/google/server/server.mjs` (S)
+
+**DoD:** письмо доходит в prod-конфигурации IMAP→quarantine→P e2e (фейковый IMAP); «цена изменилась» приходит по cron e2e; `connector upgrade` идемпотентен и показывает diff; V1/V2-контур зелёный на новых путях.
+
+---
+
+## Sprint 27 — Out-of-band подтверждение необратимых действий (2FA-approve)
+
+**Цель:** превратить `/approve` из чат-команды в реальный второй фактор — публично различимое security-преимущество над обоими конкурентами.
+
+**Спека:** [`THREAT_MODEL.md`](THREAT_MODEL.md) (сценарий «компрометация канала владельца») | **M7:** [`m7-cycles/sprint-27-2fa-approve-out-of-band-second-factor-gate/`](../m7-cycles/sprint-27-2fa-approve-out-of-band-second-factor-gate/)
+
+- [x] ADR-0011: пересмотр LOC-порога под security-фичу ядра (gate/pending) — точечное поднятие с перечнем включённого (S)
+- [x] Механизм: подтверждение irreversible-действий из **второго** paired-канала (Telegram ↔ Discord) и/или TOTP-код; конфиг `gate.second_factor` (какие классы требуют, дефолт — все irreversible) (L)
+- [x] Захваченный канал ≠ полный контроль: негативный тест «approve из того же канала, что и команда, отклоняется при включённом second_factor» (M)
+- [x] Дашборд: pending-подсказка показывает, из какого канала ждём подтверждение (S)
+
+**DoD:** `gmail_send` при включённом second_factor требует подтверждения из другого канала; компрометация одного канала не даёт выполнить необратимое действие (негативный тест, расширение security-контура V9); дефолт — выключено (без второго канала поведение прежнее).
+
+---
+
+## Sprint 28 — Волна 2: финансы read-only + заметки-сервисы (C9, C7-CalDAV/Notion)
+
+**Цель:** достроить домашние сценарии поверх C1 и workspace.
+
+**Спека:** [`CONNECTORS.md`](CONNECTORS.md) § C9, C7 | **M7:** [`m7-cycles/sprint-28-волна-2-c9-финансы-read-only-c7-caldav-c/`](../m7-cycles/sprint-28-волна-2-c9-финансы-read-only-c7-caldav-c/)
+
+- [x] C9: детект счетов/сумм из C1-почты (детерминированные паттерны в sandbox), журнал расходов в `workspace/finance/`, месячный отчёт по cron; движение денег **не маппится** (позиционная граница) (M)
+- [x] C7-CalDAV: пресет Nextcloud Tasks/Calendar (self-hosted ЦА) — Basic-auth у broker, классы read/append/delete по эталону (M)
+- [x] C7-Notion: MCP-пресет поверх P-A (HTTP-транспорт) + OAuth-sidecar при необходимости (M)
+- [x] Google Drive: +2–3 read-only tools в `connectors/google/server` (list/search/get текстовых файлов) (S)
+- [x] Решение по C10 (n8n) и C11 (Playwright) — по метрикам использования волны 1–2; зафиксировать в CONNECTORS.md (S)
+
+**DoD:** «сколько я потратил в этом месяце» отвечает из журнала; CalDAV/Notion ставятся через `connector add` за ≤10 минут; ни одного нового gate-класса; V1/V2-паттерн-тесты на каждый пресет.
+
+---
+
+## Sprint 29 — Matrix-канал (C12) + go/no-go C10/C11
+
+**Цель:** третий paired control-канал владельца (privacy-ЦА) и формальное решение по отложенным C10/C11.
+
+**Спека:** [`CONNECTORS.md`](CONNECTORS.md) §C12, §C10–C11 | [`POST_MVP_FEATURES.md`](POST_MVP_FEATURES.md) §F10 (продолжение)
+
+**Критерий старта C10/C11 в этом спринте:** только если до начала кодинга выполнены метрики Sprint 28 (см. ниже); иначе — Matrix only, C10/C11 → Sprint 30+.
+
+- [ ] ADR-0014: LOC-порог под `MatrixAdapter` (если ядро растёт) (S)
+- [ ] `MatrixAdapter` на `ChannelAdapter`: Client-Server API (`/sync` long-poll), DM-only в v1 (M)
+- [ ] Pairing write-once (как Discord/Telegram); `session_id` префикс `matrix:` в очереди (M)
+- [ ] Интеграция с Sprint 27: `gate.second_factor` cross-channel TG/Discord ↔ Matrix (S)
+- [ ] Credential homeserver + access token **только у broker** или env ref в trust-домене хоста — не в sandbox (M)
+- [ ] `aegis-setup`: hints для Matrix (homeserver URL, pairing) (S)
+- [ ] Go/no-go **C10 n8n**: ≥3 активных коннектора на эталонной установке + user-story → зафиксировать в CONNECTORS.md (S)
+- [ ] Go/no-go **C11 Playwright**: gap в research/watch (audit/dashboard) → зафиксировать в CONNECTORS.md (S)
+- [ ] Тесты: unit adapter + integration loop; V1 injection в room event (M)
+
+**DoD:** paired Matrix DM → диалог с агентом; unpaired → deny; irreversible + 2FA on → approve из другого канала; setup документирован ≤10 мин; решение C10/C11 записано (go с ADR или defer Sprint 30+).
 
 ---
 
@@ -394,11 +464,11 @@
 
 Спринты 17+ — см. [`POST_MVP_FEATURES.md`](POST_MVP_FEATURES.md) (F7–F11).
 
-- Дополнительные каналы (по одному, только официальные API)
+- Дополнительные каналы (Slack, Signal — по одному, только официальные API; Matrix — Sprint 29)
 - Вынос broker на отдельный хост / micro-VM для sandbox
-- 2FA / out-of-band подтверждение необратимых действий
 - LLM-консолидация памяти (сверх детерминированной курации)
 - Мульти-модельные конфигурации (P-LLM / Q-LLM разных провайдеров)
+- C10 n8n-мост, C11 Playwright-автоматизация — go/no-go в Sprint 29, реализация Sprint 30+ при defer
 
 ---
 
@@ -427,5 +497,9 @@
 | 23     | Connectors: волна без OAuth (C2/C3/C6/C7) |      |
 | 24     | Connectors: OAuth sidecar + Google (C1) |        |
 | 25     | Connectors: Home Assistant + GitHub (C4/C5) |    |
+| 26     | Бытовые фичи: price tracker, IMAP, upgrade (C8) | email-канал живой |
+| 27     | 2FA-approve: out-of-band подтверждение |  **security-дифференциатор** |
+| 28     | Connectors волна 2: финансы, CalDAV/Notion (C9/C7) | паритет+ |
+| 29     | Matrix-канал (C12) + go/no-go C10/C11           | privacy-канал |
 
 Ориентир: ~10 спринтов ≈ 20 недель до MVP для команды 1–3 человека. Оценки уточняются после Sprint 0.

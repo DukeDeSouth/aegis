@@ -48,6 +48,13 @@ import { IRREVERSIBLE_TEST_CMD } from '../gate/actions.ts';
 import { evaluate, type GateDeps, verdictToAuditDecision } from '../gate/engine.ts';
 import type { ActionClass } from '../gate/types.ts';
 import type { PendingStore } from '../gate/pending.ts';
+import type { SecondFactorConfig, PairedChannels } from '../gate/second-factor.ts';
+import {
+  formatApproveHint,
+  resolveRequiredChannel,
+} from '../gate/second-factor.ts';
+import { checkPendingApproval, approvalRejectHint } from '../gate/approve-check.ts';
+import type { ChannelState } from '../adapter/state.ts';
 import type { AuditLog } from '../audit/log.ts';
 import type { QueueProvenance, QueueStore } from '../queue/store.ts';
 import {
@@ -55,6 +62,7 @@ import {
   isQuarantineContent,
   isUserText,
   parseInboundPayload,
+  type ApprovedActionPayload,
 } from './message.ts';
 
 export interface OrchestratorOptions {
@@ -91,6 +99,11 @@ export interface OrchestratorOptions {
   workspace?: WorkspaceStore;
   mcpServers?: readonly McpServerConfig[];
   mcpRunner?: McpRunner;
+  secondFactor?: SecondFactorConfig;
+  totpSecret?: string;
+  channelState?: ChannelState;
+  /** Test hook: override paired-channel detection. */
+  pairedChannels?: () => PairedChannels;
 }
 
 const ACTOR = 'orchestrator';
@@ -113,6 +126,9 @@ const SKILL_ACCEPT_PREFIX = '/skill-accept ';
 const SKILL_REJECT_PREFIX = '/skill-reject ';
 const SKILL_APPROVE_PREFIX = '/skill-approve ';
 const FETCH_PREFIX = '/fetch ';
+const WATCH_PREFIX = '/watch ';
+const FINANCE_INGEST_CMD = '/finance-ingest';
+const FINANCE_REPORT_PREFIX = '/finance-report';
 const RESEARCH_PREFIX = '/research ';
 const DIGEST_CMD = '/digest';
 const REMIND_PREFIX = '/remind ';
@@ -202,6 +218,10 @@ export class Orchestrator {
   private readonly workspace: WorkspaceStore | undefined;
   private readonly mcpServers: readonly McpServerConfig[];
   private readonly mcpRunner: McpRunner | undefined;
+  private readonly secondFactor: SecondFactorConfig | undefined;
+  private readonly totpSecret: string | undefined;
+  private readonly channelState: ChannelState | undefined;
+  private readonly pairedChannelsFn: (() => PairedChannels) | undefined;
   private readonly worker: string;
   private readonly pollMs: number;
   private readonly maxTokens: number;
@@ -245,6 +265,10 @@ export class Orchestrator {
     this.workspace = opts.workspace;
     this.mcpServers = opts.mcpServers ?? [];
     this.mcpRunner = opts.mcpRunner;
+    this.secondFactor = opts.secondFactor;
+    this.totpSecret = opts.totpSecret;
+    this.channelState = opts.channelState;
+    this.pairedChannelsFn = opts.pairedChannels;
     this.worker = opts.worker ?? 'orchestrator-1';
     this.pollMs = opts.pollMs ?? 500;
     this.maxTokens = opts.maxTokens ?? 1024;
@@ -290,6 +314,48 @@ export class Orchestrator {
 
   private publishOutbound(sessionId: string, text: string): void {
     this.queues.publish('outbound', JSON.stringify({ text, session_id: sessionId }), 'system');
+  }
+
+  private gatedReply(
+    sessionId: string,
+    provenance: QueueProvenance,
+    messageId: number,
+    text: string,
+  ): void {
+    const sendGate = evaluate({ actionId: 'message.send', provenance }, this.gateDeps);
+    this.logGate('message.send', provenance, sendGate, { messageId });
+    if (sendGate.verdict === 'allow') this.publishOutbound(sessionId, text);
+  }
+
+  private enqueuePendingApproval(
+    messageId: number,
+    actionId: string,
+    payload: unknown,
+    originSessionId: string,
+    provenance: QueueProvenance,
+    prefix: string,
+  ): void {
+    const paired = this.pairedChannelsFn
+      ? this.pairedChannelsFn()
+      : {
+          telegram: this.channelState?.getOwnerUserId() !== undefined,
+          discord: this.channelState?.getDiscordOwnerId() !== undefined,
+        };
+    const required = resolveRequiredChannel(
+      this.secondFactor,
+      'irreversible',
+      originSessionId,
+      paired,
+      this.totpSecret !== undefined && this.totpSecret.length > 0,
+    );
+    const token = this.pending.create(actionId, payload, originSessionId, required);
+    this.gatedReply(
+      originSessionId,
+      provenance,
+      messageId,
+      `${prefix} ${formatApproveHint(required, token)}`,
+    );
+    this.queues.ack(messageId);
   }
 
   /** false — обработка остановлена (budget deny + уведомление). */
@@ -612,6 +678,21 @@ export class Orchestrator {
       return true;
     }
 
+    if (payload.text.startsWith(WATCH_PREFIX)) {
+      await this.handleWatch(msg.id, payload, msg.provenance);
+      return true;
+    }
+
+    if (payload.text === FINANCE_INGEST_CMD) {
+      await this.handleFinanceIngest(msg.id, payload, msg.provenance);
+      return true;
+    }
+
+    if (payload.text.startsWith(FINANCE_REPORT_PREFIX)) {
+      await this.handleFinanceReport(msg.id, payload, msg.provenance);
+      return true;
+    }
+
     if (payload.text.startsWith(FETCH_PREFIX)) {
       await this.handleFetch(msg.id, payload, msg.provenance);
       return true;
@@ -901,6 +982,150 @@ export class Orchestrator {
     );
   }
 
+  private async handleWatch(
+    messageId: number,
+    payload: { text: string; session_id: string },
+    provenance: QueueProvenance,
+  ): Promise<void> {
+    const urlRaw = payload.text.slice(WATCH_PREFIX.length).trim();
+    if (urlRaw.length === 0) {
+      this.gatedReply(payload.session_id, provenance, messageId, 'Usage: /watch <https://url>');
+      this.queues.ack(messageId);
+      return;
+    }
+    const validated = validateFetchUrl(urlRaw);
+    if (!validated.ok) {
+      this.gatedReply(payload.session_id, provenance, messageId, `Watch failed: ${validated.reason}`);
+      this.queues.ack(messageId);
+      return;
+    }
+    const gate = evaluate({ actionId: 'web.fetch', provenance }, this.gateDeps);
+    this.logGate('web.fetch', provenance, gate, { messageId, url: validated.url.href });
+    const watchFn = this.webFetcher?.watch;
+    if (gate.verdict !== 'allow' || watchFn === undefined) {
+      this.gatedReply(
+        payload.session_id,
+        provenance,
+        messageId,
+        'Watch failed: web.fetch denied or not configured',
+      );
+      this.queues.ack(messageId);
+      return;
+    }
+    try {
+      const line = await watchFn.call(this.webFetcher, urlRaw);
+      if (line.startsWith('WATCH_CHANGED:')) {
+        this.audit.append({
+          actor: ACTOR,
+          action: 'watch.changed',
+          decision: 'info',
+          payload: { messageId, url: validated.url.href, summary: line },
+        });
+        this.gatedReply(payload.session_id, provenance, messageId, line);
+      } else if (line.startsWith('WATCH_OK:')) {
+        this.audit.append({
+          actor: ACTOR,
+          action: line.includes('baseline') ? 'watch.baseline' : 'watch.unchanged',
+          decision: 'info',
+          payload: { messageId, url: validated.url.href },
+        });
+      } else {
+        throw new Error(line.startsWith('WATCH_ERROR:') ? line : `unexpected watch output: ${line}`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.gatedReply(payload.session_id, provenance, messageId, `Watch failed: ${msg}`);
+    }
+    this.queues.ack(messageId);
+  }
+
+  private async handleFinanceIngest(
+    messageId: number,
+    payload: { text: string; session_id: string },
+    provenance: QueueProvenance,
+  ): Promise<void> {
+    const actionId = 'mcp.google.gmail_finance_fetch';
+    const gate = evaluate({ actionId, provenance }, this.gateDeps);
+    this.logGate(actionId, provenance, gate, { messageId });
+    const serverCfg = findMcpServer(this.mcpServers, 'google');
+    const ingestFn = this.webFetcher?.financeIngest;
+    if (gate.verdict !== 'allow' || !this.mcpRunner || !serverCfg || ingestFn === undefined) {
+      this.gatedReply(
+        payload.session_id,
+        provenance,
+        messageId,
+        'Finance ingest failed: google MCP or workspace not configured',
+      );
+      this.queues.ack(messageId);
+      return;
+    }
+    if (!isMcpToolMapped(this.mcpServers, 'google', 'gmail_finance_fetch')) {
+      this.gatedReply(
+        payload.session_id,
+        provenance,
+        messageId,
+        'Finance ingest failed: gmail_finance_fetch not mapped in mcp.servers',
+      );
+      this.queues.ack(messageId);
+      return;
+    }
+    try {
+      const bodies = await this.mcpRunner.call(serverCfg, 'gmail_finance_fetch', { max: 20 });
+      const line = await ingestFn.call(this.webFetcher, bodies);
+      if (line.startsWith('FINANCE_OK:')) {
+        this.audit.append({
+          actor: ACTOR,
+          action: 'finance.ingest',
+          decision: 'info',
+          payload: { messageId, summary: line },
+        });
+        this.gatedReply(payload.session_id, provenance, messageId, line);
+      } else {
+        throw new Error(line.startsWith('FINANCE_ERROR:') ? line : `unexpected finance output: ${line}`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.gatedReply(payload.session_id, provenance, messageId, `Finance ingest failed: ${msg}`);
+    }
+    this.queues.ack(messageId);
+  }
+
+  private async handleFinanceReport(
+    messageId: number,
+    payload: { text: string; session_id: string },
+    provenance: QueueProvenance,
+  ): Promise<void> {
+    const gate = evaluate({ actionId: 'file.read', provenance }, this.gateDeps);
+    this.logGate('file.read', provenance, gate, { messageId });
+    const reportFn = this.webFetcher?.financeReport;
+    const rest = payload.text.slice(FINANCE_REPORT_PREFIX.length).trim();
+    const month = /^\d{4}-\d{2}$/.test(rest) ? rest : undefined;
+    if (gate.verdict !== 'allow' || reportFn === undefined) {
+      this.gatedReply(
+        payload.session_id,
+        provenance,
+        messageId,
+        'Finance report failed: file.read denied or workspace not configured',
+      );
+      this.queues.ack(messageId);
+      return;
+    }
+    try {
+      const line = await reportFn.call(this.webFetcher, month);
+      this.audit.append({
+        actor: ACTOR,
+        action: 'finance.report',
+        decision: 'info',
+        payload: { messageId, month: month ?? 'current', summary: line },
+      });
+      this.gatedReply(payload.session_id, provenance, messageId, line);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.gatedReply(payload.session_id, provenance, messageId, `Finance report failed: ${msg}`);
+    }
+    this.queues.ack(messageId);
+  }
+
   /** C2 (Sprint 23): /research <q> = /fetch по web.search_url — тот же quarantine-путь. */
   private async handleResearch(
     messageId: number,
@@ -963,24 +1188,14 @@ export class Orchestrator {
     this.logGate(actionId, provenance, gate, { messageId, server, tool });
 
     if (gate.verdict === 'confirm_required') {
-      const chatId = Number(payload.session_id.replace(/^tg:/, ''));
-      if (!Number.isSafeInteger(chatId)) {
-        this.queues.ack(messageId);
-        return;
-      }
-      const token = this.pending.create(
+      this.enqueuePendingApproval(
+        messageId,
         actionId,
         { session_id: payload.session_id, server, tool, args },
-        chatId,
+        payload.session_id,
+        provenance,
+        `MCP ${server}.${tool} requires approval.`,
       );
-      const sendGate = evaluate({ actionId: 'message.send', provenance }, this.gateDeps);
-      if (sendGate.verdict === 'allow') {
-        this.publishOutbound(
-          payload.session_id,
-          `MCP ${server}.${tool} requires approval. Confirm with: /approve ${token}`,
-        );
-      }
-      this.queues.ack(messageId);
       return;
     }
 
@@ -1988,25 +2203,14 @@ export class Orchestrator {
     }
 
     if (gate.verdict === 'confirm_required') {
-      const chatId = Number(payload.session_id.replace(/^tg:/, ''));
-      if (!Number.isSafeInteger(chatId)) {
-        this.queues.ack(messageId);
-        return;
-      }
-      const token = this.pending.create(
+      this.enqueuePendingApproval(
+        messageId,
         'action.dangerous',
         { session_id: payload.session_id },
-        chatId,
+        payload.session_id,
+        provenance,
+        'Irreversible action pending.',
       );
-      const sendGate = evaluate({ actionId: 'message.send', provenance }, this.gateDeps);
-      this.logGate('message.send', provenance, sendGate, { messageId, pending: token });
-      if (sendGate.verdict === 'allow') {
-        this.publishOutbound(
-          payload.session_id,
-          `Irreversible action pending. Confirm with: /approve ${token}`,
-        );
-      }
-      this.queues.ack(messageId);
       return;
     }
 
@@ -2015,17 +2219,45 @@ export class Orchestrator {
 
   private async handleApproved(
     messageId: number,
-    payload: { token: string; session_id: string },
+    payload: ApprovedActionPayload,
     provenance: QueueProvenance,
   ): Promise<void> {
-    const record = this.pending.consume(payload.token);
-    if (!record) {
+    const peeked = this.pending.peek(payload.token);
+    if (!peeked) {
       this.audit.append({
         actor: ACTOR,
         action: 'approval.invalid',
         decision: 'deny',
         payload: { messageId, token: payload.token },
       });
+      this.queues.ack(messageId);
+      return;
+    }
+
+    const reject = checkPendingApproval(
+      peeked,
+      payload.session_id,
+      payload.totp_code,
+      this.totpSecret,
+    );
+    if (reject !== null) {
+      this.audit.append({
+        actor: ACTOR,
+        action: reject === 'totp_invalid' ? 'approval.totp_invalid' : 'approval.wrong_channel',
+        decision: 'deny',
+        payload: { messageId, token: payload.token, required: peeked.requiredChannel },
+      });
+      const hint =
+        reject === 'wrong_channel' && peeked.requiredChannel
+          ? approvalRejectHint(peeked.requiredChannel, payload.token)
+          : formatApproveHint(peeked.requiredChannel, payload.token);
+      this.gatedReply(payload.session_id, provenance, messageId, hint);
+      this.queues.ack(messageId);
+      return;
+    }
+
+    const record = this.pending.consume(payload.token);
+    if (!record) {
       this.queues.ack(messageId);
       return;
     }

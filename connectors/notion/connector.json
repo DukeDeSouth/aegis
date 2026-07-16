@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "name": "notion",
+  "description": "Notion API via broker integration credential (C7-Notion)",
+  "skill": true,
+  "broker_routes": [],
+  "broker_listener": {
+    "port": 8085,
+    "secret_name": "notion_token",
+    "sds_path": "/etc/broker/notion/secret.yaml",
+    "routes": [
+      {
+        "host": "api.notion.com",
+        "cluster_address": "api.notion.com",
+        "cluster_port": 443,
+        "tls": true
+      }
+    ]
+  },
+  "config_hints": [
+    "Create integration at notion.so/my-integrations; token → deploy/broker/notion/token.txt (0600)",
+    "mcp server → { \"name\": \"notion\", \"transport\": \"stdio\", \"command\": [\"node\", \"server.mjs\"], \"server_dir\": \"./connectors/notion/server\", \"allowed_hosts\": [\"aegis-broker\"], \"tools\": [ {\"name\": \"pages_search\", \"action_class\": \"read-only\"}, {\"name\": \"page_get\", \"action_class\": \"read-only\"}, {\"name\": \"blocks_list\", \"action_class\": \"read-only\"}, {\"name\": \"page_append\", \"action_class\": \"reversible\"}, {\"name\": \"page_archive\", \"action_class\": \"irreversible\"} ] }"
+  ]
+}

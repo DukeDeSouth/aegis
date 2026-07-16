@@ -1,0 +1,7 @@
+{
+  "host": "imap.example.com",
+  "port": 993,
+  "user": "you@example.com",
+  "password": "app-password-here",
+  "mailbox": "INBOX"
+}

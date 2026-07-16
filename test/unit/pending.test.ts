@@ -17,15 +17,18 @@ describe('PendingStore', () => {
     const db = openDb(join(tmp, 'once.db'));
     applyMigration(db, migration('0001-queue.sql'), 1);
     applyMigration(db, migration('0003-queue.sql'), 3);
+    applyMigration(db, migration('0009-queue.sql'), 9);
     const store = new PendingStore(db, { now: () => 1000, ttlMs: 60_000 });
 
-    const token = store.create('action.dangerous', { x: 1 }, 42);
+    const token = store.create('action.dangerous', { x: 1 }, 'tg:42', 'discord');
     expect(token).toMatch(/^[0-9a-f]{8}$/);
 
     const r = store.consume(token);
     expect(r?.actionId).toBe('action.dangerous');
     expect(JSON.parse(r!.payload)).toEqual({ x: 1 });
     expect(r?.chatId).toBe(42);
+    expect(r?.originSessionId).toBe('tg:42');
+    expect(r?.requiredChannel).toBe('discord');
 
     expect(store.consume(token)).toBeNull();
   });
@@ -34,10 +37,11 @@ describe('PendingStore', () => {
     const db = openDb(join(tmp, 'exp.db'));
     applyMigration(db, migration('0001-queue.sql'), 1);
     applyMigration(db, migration('0003-queue.sql'), 3);
+    applyMigration(db, migration('0009-queue.sql'), 9);
     let now = 1000;
     const store = new PendingStore(db, { now: () => now, ttlMs: 100 });
 
-    const token = store.create('action.dangerous', {}, 1);
+    const token = store.create('action.dangerous', {}, 'tg:1', null);
     now = 2000;
     expect(store.consume(token)).toBeNull();
   });

@@ -12,13 +12,13 @@ import type { TgMessage, TgUpdate } from './telegram-client.ts';
 export type Classified =
   | { kind: 'owner_text'; chatId: number; text: string }
   | { kind: 'pair_attempt'; chatId: number; fromId: number; code: string }
-  | { kind: 'approve_attempt'; chatId: number; token: string }
+  | { kind: 'approve_attempt'; chatId: number; token: string; totpCode?: string }
   | { kind: 'untrusted'; chatId: number; reason: 'forwarded' | 'non_text' }
   | { kind: 'stranger' }
   | { kind: 'ignored' };
 
 const PAIR_RE = /^\/pair\s+(\S+)$/;
-const APPROVE_RE = /^\/approve\s+(\S+)$/;
+const APPROVE_RE = /^\/approve\s+(\S+)(?:\s+(\d{6}))?$/;
 
 /** Извлекает текст недоверенного сообщения для Q-LLM (forward / вложение). */
 export function extractUntrustedBody(msg: TgMessage): string {
@@ -46,7 +46,10 @@ export function classifyUpdate(u: TgUpdate, ownerUserId: number | undefined): Cl
   if (ownerUserId !== undefined && fromId === ownerUserId) {
     const approveMatch = typeof msg.text === 'string' ? APPROVE_RE.exec(msg.text) : null;
     const token = approveMatch?.[1];
-    if (token !== undefined) return { kind: 'approve_attempt', chatId, token };
+    const totpCode = approveMatch?.[2];
+    if (token !== undefined) {
+      return { kind: 'approve_attempt', chatId, token, ...(totpCode ? { totpCode } : {}) };
+    }
   }
 
   if (ownerUserId === undefined || fromId !== ownerUserId) return { kind: 'stranger' };

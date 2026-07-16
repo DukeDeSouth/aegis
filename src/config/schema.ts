@@ -37,6 +37,8 @@ export const emailInputSchema = z
   .object({
     poll_interval_s: z.number().int().min(5).default(60),
     session_id: z.string().min(1).default('email:inbox'),
+    /** Sprint 26: imap-bridge HTTP base (e.g. http://imap-bridge:8090). */
+    imap_bridge_host: z.string().url().optional(),
   })
   .strict();
 
@@ -112,6 +114,21 @@ export const sandboxSchema = z
 
 const actionClassSchema = z.enum(['read-only', 'reversible', 'irreversible']);
 
+export const secondFactorSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    modes: z.array(z.enum(['cross_channel', 'totp'])).default(['cross_channel']),
+    action_classes: z.array(z.enum(['irreversible'])).default(['irreversible']),
+    totp_secret_ref: keyRef.optional(),
+  })
+  .strict();
+
+export const gateSchema = z
+  .object({
+    second_factor: secondFactorSchema.optional(),
+  })
+  .strict();
+
 export const mcpToolSchema = z
   .object({
     name: z.string().min(1),
@@ -180,6 +197,7 @@ export const configSchema = z
     web: webSchema.optional(),
     sandbox: sandboxSchema.optional(),
     mcp: mcpSchema.optional(),
+    gate: gateSchema.optional(),
     llm: z
       .object({
         p_llm: llmProfileSchema,
@@ -208,3 +226,5 @@ export type McpConfig = z.infer<typeof mcpSchema>;
 export type McpServerConfig = z.infer<typeof mcpServerSchema>;
 export type McpStdioServerConfig = z.infer<typeof mcpStdioServerSchema>;
 export type McpHttpServerConfig = z.infer<typeof mcpHttpServerSchema>;
+export type GateConfig = z.infer<typeof gateSchema>;
+export type SecondFactorConfig = z.infer<typeof secondFactorSchema>;

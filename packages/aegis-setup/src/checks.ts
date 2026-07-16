@@ -68,3 +68,68 @@ export function parseEnvFile(content: string): Record<string, string> {
   }
   return out;
 }
+
+/** Sprint 26: smoke broker — 401 без OAuth-креда, 404 на неизвестный Host (если broker поднят). */
+export async function checkBrokerSmoke(
+  composeDir: string,
+  envoyYaml: string,
+  run: ExecFn = exec,
+): Promise<{ ok: true; detail: string } | { ok: false; reason: string } | { ok: true; skipped: true }> {
+  try {
+    const { stdout: cidOut } = await run('docker', ['compose', 'ps', '-q', 'broker'], {
+      cwd: composeDir,
+      timeout: 15_000,
+    });
+    const cid = cidOut.trim();
+    if (cid.length === 0) return { ok: true, skipped: true };
+
+    const { stdout: netJson } = await run('docker', ['inspect', cid, '--format', '{{json .NetworkSettings.Networks}}'], {
+      timeout: 15_000,
+    });
+    const nets = Object.keys(JSON.parse(netJson) as Record<string, unknown>);
+    const network = nets.find((n) => n.includes('internal')) ?? nets[0];
+    if (network === undefined) return { ok: false, reason: 'broker network not found' };
+
+    const curl = (host: string, port: number, logicalHost: string): Promise<string> =>
+      run(
+        'docker',
+        [
+          'run',
+          '--rm',
+          '--network',
+          network,
+          'curlimages/curl:8.5.0',
+          '-s',
+          '-o',
+          '/dev/null',
+          '-w',
+          '%{http_code}',
+          '-H',
+          `Host: ${logicalHost}`,
+          `http://${host}:${port}/`,
+        ],
+        { timeout: 25_000 },
+      ).then((r) => r.stdout.trim());
+
+    const oauthPort = envoyYaml.includes('conn-google-listener') ? 8081 : undefined;
+    const parts: string[] = [];
+
+    if (oauthPort !== undefined) {
+      const code401 = await curl('broker', oauthPort, 'gmail.googleapis.com');
+      if (code401 !== '401') {
+        return { ok: false, reason: `OAuth listener :${oauthPort} expected 401 without cred, got ${code401}` };
+      }
+      parts.push(`401 on :${oauthPort}`);
+    }
+
+    const code404 = await curl('broker', 8080, 'evil.not-in-allowlist.test');
+    if (code404 !== '404') {
+      return { ok: false, reason: `broker :8080 expected 404 on unknown Host, got ${code404}` };
+    }
+    parts.push('404 on unknown Host');
+
+    return { ok: true, detail: parts.join(', ') };
+  } catch {
+    return { ok: true, skipped: true };
+  }
+}

@@ -23,6 +23,8 @@ export interface PendingRow {
   token: string;
   actionId: string;
   chatId: number;
+  originSessionId: string;
+  requiredChannel: string | null;
   createdAt: number;
   expiresAt: number;
 }
@@ -153,24 +155,32 @@ function listQueue(db: Database.Database, queue: string, limit: number): QueueRo
 }
 
 function listPending(db: Database.Database, now: number): PendingRow[] {
-  return (
-    db
-      .prepare(
-        `SELECT token, action_id, chat_id, created_at, expires_at
-         FROM pending_actions WHERE consumed = 0 AND expires_at > ?
-         ORDER BY created_at DESC`,
-      )
-      .all(now) as {
-      token: string;
-      action_id: string;
-      chat_id: number;
-      created_at: number;
-      expires_at: number;
-    }[]
-  ).map((r) => ({
+  const has2fa = (
+    db.prepare('PRAGMA table_info(pending_actions)').all() as { name: string }[]
+  ).some((c) => c.name === 'origin_session_id');
+  const rows = db
+    .prepare(
+      has2fa
+        ? `SELECT token, action_id, chat_id, origin_session_id, required_channel, created_at, expires_at
+           FROM pending_actions WHERE consumed = 0 AND expires_at > ? ORDER BY created_at DESC`
+        : `SELECT token, action_id, chat_id, created_at, expires_at
+           FROM pending_actions WHERE consumed = 0 AND expires_at > ? ORDER BY created_at DESC`,
+    )
+    .all(now) as {
+    token: string;
+    action_id: string;
+    chat_id: number;
+    origin_session_id?: string | null;
+    required_channel?: string | null;
+    created_at: number;
+    expires_at: number;
+  }[];
+  return rows.map((r) => ({
     token: r.token,
     actionId: r.action_id,
     chatId: r.chat_id,
+    originSessionId: r.origin_session_id ?? `tg:${r.chat_id}`,
+    requiredChannel: r.required_channel ?? null,
     createdAt: r.created_at,
     expiresAt: r.expires_at,
   }));

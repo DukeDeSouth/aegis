@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "name": "finance",
+  "version": "0.1.0",
+  "needs": ["files.read", "files.write", "messages.send"],
+  "network": [],
+  "action_class": "read-only",
+  "code": false,
+  "entrypoints": []
+}

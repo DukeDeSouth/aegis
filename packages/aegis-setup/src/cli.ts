@@ -11,7 +11,7 @@ Commands:
   init       Interactive install (default)
   verify     Smoke-check Node, Docker, config, broker, Telegram
   upgrade    Show diff and update deploy templates
-  connector  list | add <name…> — install connector presets (skills + broker routes)
+  connector  list | add <name…> | upgrade <name…> — connector presets
 
 Options:
   --dir <path>   Install directory (default: cwd)

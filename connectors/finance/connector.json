@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "name": "finance",
+  "description": "Read-only expense journal from Gmail receipts (C9)",
+  "skill": true,
+  "broker_routes": [],
+  "config_hints": [
+    "requires google connector (C1) with gmail_finance_fetch tool in mcp.servers",
+    "daily ingest cron: { \"id\": \"finance-ingest\", \"cron\": \"08:00\", \"text\": \"/finance-ingest\", \"session_id\": \"tg:YOUR_CHAT_ID\" }",
+    "monthly report cron: { \"id\": \"finance-report\", \"cron\": \"0 9 1 * *\", \"text\": \"/finance-report\", \"session_id\": \"tg:YOUR_CHAT_ID\" }"
+  ]
+}

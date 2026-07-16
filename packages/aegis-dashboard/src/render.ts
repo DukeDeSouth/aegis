@@ -26,18 +26,25 @@ function queueTable(title: string, rows: QueueRow[]): string {
 <tbody>${body}</tbody></table>`;
 }
 
+function pendingHint(required: string | null, token: string): string {
+  if (required === 'discord') return `Confirm in Discord: /approve ${token}`;
+  if (required === 'telegram') return `Confirm in Telegram: /approve ${token}`;
+  if (required === 'totp') return `Confirm with TOTP: /approve ${token} &lt;6-digit-code&gt;`;
+  return `Confirm in paired channel: /approve ${token}`;
+}
+
 function pendingSection(rows: PendingRow[]): string {
   if (rows.length === 0) return '<h2>Pending approvals</h2><p class="empty">(нет ожидающих)</p>';
   const body = rows
     .map(
       (r) =>
-        `<tr><td class="mono">${escapeHtml(r.token)}</td><td>${escapeHtml(r.actionId)}</td><td>${r.chatId}</td><td>${escapeHtml(fmtTs(r.expiresAt))}</td>
-<td class="hint">Подтвердите в paired-канале: <code>/approve ${escapeHtml(r.token)}</code></td></tr>`,
+        `<tr><td class="mono">${escapeHtml(r.token)}</td><td>${escapeHtml(r.actionId)}</td><td>${escapeHtml(r.originSessionId)}</td><td>${escapeHtml(fmtTs(r.expiresAt))}</td>
+<td class="hint">${escapeHtml(pendingHint(r.requiredChannel, r.token))}</td></tr>`,
     )
     .join('');
   return `<h2>Pending approvals</h2>
 <p class="note">Дашборд не подтверждает действия — только подсказка.</p>
-<table><thead><tr><th>token</th><th>action</th><th>chat</th><th>expires</th><th>hint</th></tr></thead>
+<table><thead><tr><th>token</th><th>action</th><th>origin</th><th>expires</th><th>hint</th></tr></thead>
 <tbody>${body}</tbody></table>`;
 }
 

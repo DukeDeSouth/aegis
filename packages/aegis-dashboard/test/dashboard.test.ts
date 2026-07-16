@@ -43,6 +43,7 @@ function seedWorld(): DashboardConfig {
   const memoryDb = openDb(join(dataDir, 'memory.db'));
   applyMigration(queueDb, migration('0001-queue.sql'), 1);
   applyMigration(queueDb, migration('0003-queue.sql'), 3);
+  applyMigration(queueDb, migration('0009-queue.sql'), 9);
   applyMigration(queueDb, migration('0004-budget.sql'), 4);
   applyMigration(auditDb, migration('0001-audit.sql'), 1);
   applyMigration(memoryDb, migration('0001-memory.sql'), 1);
@@ -65,8 +66,8 @@ function seedWorld(): DashboardConfig {
     );
   queueDb
     .prepare(
-      `INSERT INTO pending_actions (token, action_id, payload, chat_id, created_at, expires_at, consumed)
-       VALUES ('deadbeef', 'action.dangerous', '{}', 10, ?, ?, 0)`,
+      `INSERT INTO pending_actions (token, action_id, payload, chat_id, origin_session_id, required_channel, created_at, expires_at, consumed)
+       VALUES ('deadbeef', 'action.dangerous', '{}', 10, 'tg:10', 'discord', ?, ?, 0)`,
     )
     .run(now, now + 60_000);
   queueDb
@@ -98,7 +99,7 @@ describe('aegis-dashboard (F11)', () => {
     const html = renderDashboard(collectDashboardData(cfg, 1_750_000_000_000));
     expect(html).not.toContain('<img src=x');
     expect(html).toContain('&lt;img');
-    expect(html).toContain('/approve deadbeef');
+    expect(html).toContain('Confirm in Discord');
   });
 
   it('HTTP GET / returns 200 with security headers', async () => {

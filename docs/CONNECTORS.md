@@ -126,7 +126,7 @@ Google/Microsoft/Notion живут на OAuth2 с коротким access-token.
 - CalDAV/Nextcloud Tasks (self-hosted ЦА) и Notion (mainstream) — MCP-пресеты поверх P-A/P-B.
 - Классы: read — read-only; append/create — reversible; delete — irreversible.
 
-**Статус (Sprint 23): workspace-шаг реализован** — `connectors/notes`: декларативный навык (`network: none`, `files.read`+`files.write`) с процедурами `/write notes/…`, `/read`, `/undo-file`, конвенциями kebab-case/daily и Obsidian-vault поверх `sandbox.workspace_dir`. CalDAV/Notion — волна 2.
+**Статус (Sprint 23): workspace-шаг реализован** — `connectors/notes`: декларативный навык (`network: none`, `files.read`+`files.write`) с процедурами `/write notes/…`, `/read`, `/undo-file`, конвенциями kebab-case/daily и Obsidian-vault поверх `sandbox.workspace_dir`. **Sprint 28:** `connectors/caldav` (CalDAV :8084 Basic-auth) и `connectors/notion` (integration token :8085).
 
 ---
 
@@ -134,23 +134,33 @@ Google/Microsoft/Notion живут на OAuth2 с коротким access-token.
 
 ### C8. Price tracker / мониторинг страниц
 
-Топ-5 OpenClaw. У нас есть всё: scheduler (cron) + web.fetch + `web_cache`. Не хватает только diff-логики: «страница изменилась / цена ниже порога → уведомление». Реализация — навык + маленький детерминированный diff в sandbox-скрипте fetch; ядро не трогаем.
+**Статус (Sprint 26):** реализовано — пресет `connectors/watch` (skill-only), `skills/web-fetch/watch.sh` (детерминированный diff + price heuristic в sandbox), `/watch` в ядре (~50 LOC, ADR-0012), cron-hint в connector.json; снимки в `workspace/watch/<hash>.digest`.
+
+Топ-5 OpenClaw. У нас есть всё: scheduler (cron) + web.fetch. Diff-логика: «страница изменилась / цена ниже порога → уведомление».
 
 ### C9. Финансы read-only
+
+**Статус (Sprint 28):** реализовано — пресет `connectors/finance` (skill + `parse_finance.sh` / `report_finance.sh` в sandbox); ядро: `/finance-ingest` (MCP `gmail_finance_fetch` → журнал `workspace/finance/`) и `/finance-report` (ADR-0013). Движение денег не маппится.
 
 Спрос подтверждён (бюджет-агенты, счета из почты). Наша версия — принципиально **read-only**: детект счетов/сумм из C1-почты, журнал расходов в workspace, месячный отчёт по cron. Движение денег не маппится (см. эталон классов) — это позиционная граница, а не недоделка.
 
 ### C10. Мост n8n/Zapier
 
+**Статус: DEFER (Sprint 29+)** — решение Sprint 28: отложить до метрик волны 1–2. Критерий revisit: ≥3 активных коннектора у установки + явный user-story на webhook-автоматизации.
+
 Один коннектор → 400+ приложений; популярен (52k+ установок у OpenClaw). Риск: за webhook'ом n8n может стоять что угодно, классы не выводимы. Правило: **каждый workflow маппится владельцем отдельно**, дефолт — irreversible; ответы — quarantine. Дёшево (generic HTTP MCP-tool + маршрут), но включать после волны 1.
 
 ### C11. Browser automation (Playwright MCP)
+
+**Статус: DEFER (Sprint 29+)** — JS-render покрыт `/fetch` + C8; Playwright — cookie/login surface. Revisit при доказанном gap в research/watch метриках.
 
 №1 по поиску в MCP-экосистеме, но самая опасная поверхность (интерактивные сессии = куки/логины). Если делать: headless-браузер в отдельном sandbox-контейнере, сеть только через broker, только read-сценарии (рендер JS-страниц для C2/C8), никаких логинов в первой версии. Решение об очерёдности — после метрик использования волны 1.
 
 ### C12. Каналы Slack / Matrix / Signal
 
 Это продолжение F10 (каналы, не коннекторы) — по одному, только официальные API, поверх `ChannelAdapter`. Приоритет по запросам пользователей; Matrix/Signal резонируют с privacy-ЦА.
+
+**Статус: Sprint 29 (Matrix)** — первый канал волны C12; Slack/Signal — Sprint 30+ по запросу.
 
 ## Чего сознательно НЕ делаем
 

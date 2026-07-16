@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   checkBrokerRunning,
+  checkBrokerSmoke,
   checkDocker,
   checkNodeVersion,
   checkTelegramToken,
@@ -70,6 +71,22 @@ export async function runVerify(opts: VerifyOptions): Promise<number> {
         ok: broker.ok,
         detail: broker.ok ? 'broker running' : broker.reason,
       });
+      if (broker.ok && brokerYaml) {
+        const smoke = await checkBrokerSmoke(
+          join(paths.root, 'deploy'),
+          readText(paths.brokerEnvoy) ?? '',
+          exec,
+        );
+        if ('skipped' in smoke && smoke.skipped) {
+          results.push({ name: 'broker-smoke', ok: true, detail: 'skipped' });
+        } else {
+          results.push({
+            name: 'broker-smoke',
+            ok: smoke.ok,
+            detail: 'ok' in smoke && smoke.ok ? smoke.detail : (smoke as { reason: string }).reason,
+          });
+        }
+      }
     }
   }
 

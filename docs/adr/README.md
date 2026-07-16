@@ -14,5 +14,8 @@
 | [0008](0008-llm-provider-abstraction.md)          | LLM: OpenAI-совместимый протокол, тонкий клиент   | Accepted |
 | [0009](0009-post-mvp-core-loc-budget.md)          | Post-MVP LOC порог 5000 (Sprint 11–12)            | Accepted |
 | [0010](0010-oauth-refresh-sidecar.md)             | OAuth-refresh sidecar в trust-домене broker       | Accepted |
+| [0013](0013-sprint-28-finance-loc.md)            | Sprint 28: C9 finance dispatch; LOC 8100          | Accepted |
+| [0012](0012-sprint-26-watch-imap-loc.md)          | Sprint 26: /watch + IMAP fetcher; LOC 7650        | Accepted |
+| [0011](0011-sprint-27-2fa-gate-loc.md)            | Sprint 27: 2FA human-gate; LOC 7920               | Accepted |
 
 Новые ADR нумеруются по порядку. Решение не удаляется, а помечается `Superseded by NNNN`.

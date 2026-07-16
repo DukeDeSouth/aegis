@@ -113,6 +113,9 @@ export async function runInit(opts: InitOptions): Promise<number> {
 
   console.log('\nNext steps:');
   console.log(`  1. Edit ${paths.hostEnv} — add LLM keys if needed`);
+  console.log(
+    '     Tip: set learning.self_improvement_llm_enabled=true in aegis.config.json for F5 self-improvement',
+  );
   console.log(`  2. cd ${join(opts.targetDir, 'deploy')} && docker compose --env-file .env up -d broker`);
   console.log('  3. source .env.aegis && npm start');
   console.log('  4. aegis-setup verify');

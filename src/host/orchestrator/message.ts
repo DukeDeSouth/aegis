@@ -18,6 +18,7 @@ const approvedActionSchema = z
     kind: z.literal('approved_action'),
     token: z.string().min(1),
     session_id: z.string().min(1),
+    totp_code: z.string().regex(/^\d{6}$/).optional(),
   })
   .strict();
 

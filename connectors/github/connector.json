@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "name": "github",
+  "description": "GitHub REST API via dedicated broker listener :8083 and fine-grained credential (C5)",
+  "skill": true,
+  "broker_routes": [],
+  "broker_listener": {
+    "port": 8083,
+    "secret_name": "github_token",
+    "sds_path": "/etc/broker/github/secret.yaml",
+    "routes": [
+      {
+        "host": "api.github.com",
+        "cluster_address": "api.github.com",
+        "cluster_port": 443,
+        "tls": true
+      }
+    ]
+  },
+  "config_hints": [
+    "Create a fine-grained PAT with repo read/write as needed; write to deploy/broker/github/token.txt (0600, not in git). Mount github/secret.yaml + token.txt in docker-compose (see deploy/broker/github/README.md)",
+    "mcp server for aegis.config.json → mcp.servers: { \"name\": \"github\", \"transport\": \"stdio\", \"command\": [\"node\", \"server.mjs\"], \"server_dir\": \"./connectors/github/server\", \"allowed_hosts\": [\"aegis-broker\"], \"tools\": [ {\"name\": \"issues_list\", \"action_class\": \"read-only\"}, {\"name\": \"issue_get\", \"action_class\": \"read-only\"}, {\"name\": \"issue_create\", \"action_class\": \"reversible\"}, {\"name\": \"issue_comment\", \"action_class\": \"reversible\"}, {\"name\": \"pr_merge\", \"action_class\": \"irreversible\"}, {\"name\": \"issue_close\", \"action_class\": \"irreversible\"} ] }"
+  ]
+}

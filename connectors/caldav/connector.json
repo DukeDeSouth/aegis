@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "name": "caldav",
+  "description": "CalDAV calendars and tasks via broker Basic-auth (C7-CalDAV)",
+  "skill": true,
+  "broker_routes": [],
+  "broker_listener": {
+    "port": 8084,
+    "secret_name": "caldav_basic",
+    "sds_path": "/etc/broker/caldav/secret.yaml",
+    "routes": [
+      {
+        "host": "nextcloud.local",
+        "cluster_address": "127.0.0.1",
+        "cluster_port": 443,
+        "tls": true
+      }
+    ]
+  },
+  "config_hints": [
+    "Set cluster_address in envoy to your Nextcloud host before connector add",
+    "Create deploy/broker/caldav/basic.txt with user:password (0600); see deploy/broker/caldav/README.md",
+    "mcp server → { \"name\": \"caldav\", \"transport\": \"stdio\", \"command\": [\"node\", \"server.mjs\"], \"server_dir\": \"./connectors/caldav/server\", \"allowed_hosts\": [\"aegis-broker\"], \"tools\": [ {\"name\": \"calendar_list\", \"action_class\": \"read-only\"}, {\"name\": \"events_list\", \"action_class\": \"read-only\"}, {\"name\": \"tasks_list\", \"action_class\": \"read-only\"}, {\"name\": \"task_create\", \"action_class\": \"reversible\"}, {\"name\": \"task_complete\", \"action_class\": \"reversible\"}, {\"name\": \"task_delete\", \"action_class\": \"irreversible\"} ] }"
+  ]
+}

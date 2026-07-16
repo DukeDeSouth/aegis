@@ -19,9 +19,29 @@ const CAL_HOST = 'www.googleapis.com';
 const MAX_BODY = 512 * 1024;
 const enc = encodeURIComponent;
 
-function httpViaBroker(host, method, path, bodyObj) {
+/** RFC 2047 encoded-words in headers (Sprint 26). */
+function decodeMimeWords(value) {
+  return String(value).replace(
+    /=\?([^?]+)\?([BbQq])\?([^?]*)\?=/g,
+    (_, _charset, encType, text) => {
+      if (encType.toUpperCase() === 'B') {
+        try {
+          return Buffer.from(text.replace(/\s/g, ''), 'base64').toString('utf8');
+        } catch {
+          return text;
+        }
+      }
+      return text
+        .replace(/_/g, ' ')
+        .replace(/=([0-9A-Fa-f]{2})/g, (_m, hex) => String.fromCharCode(parseInt(hex, 16)));
+    },
+  );
+}
+
+function httpViaBroker(host, method, path, bodyObj, httpOpts) {
   const [brokerHost, brokerPort] = BROKER.split(':');
-  const payload = bodyObj === undefined ? undefined : JSON.stringify(bodyObj);
+  const isRaw = typeof bodyObj === 'string';
+  const payload = bodyObj === undefined ? undefined : isRaw ? bodyObj : JSON.stringify(bodyObj);
   return new Promise((resolve, reject) => {
     const req = request(
       {
@@ -30,10 +50,13 @@ function httpViaBroker(host, method, path, bodyObj) {
         method,
         path,
         headers: {
-          host, // логический upstream: broker матчит virtual_host и инжектит кред
-          accept: 'application/json',
+          host,
+          accept: httpOpts?.accept ?? (isRaw ? 'text/plain' : 'application/json'),
           ...(payload !== undefined
-            ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) }
+            ? {
+                'content-type': httpOpts?.contentType ?? (isRaw ? 'text/plain' : 'application/json'),
+                'content-length': Buffer.byteLength(payload),
+              }
             : {}),
         },
       },
@@ -81,7 +104,57 @@ function eventLines(json) {
     .join('\n');
 }
 
-/** tool → {host, реквест, выжимка ответа}. Классы действий объявляет конфиг ядра. */
+function fileLines(json) {
+  const files = json.files ?? [];
+  if (files.length === 0) return 'no files';
+  return files.map((f) => `${f.id}: ${f.name ?? '(unnamed)'} (${f.mimeType ?? '?'})`).join('\n');
+}
+
+const FINANCE_QUERY =
+  'newer_than:30d (subject:receipt OR subject:invoice OR subject:order OR subject:чек OR subject:счёт)';
+
+async function gmailFinanceFetch(args) {
+  const max = maxResults(args);
+  const searchRes = await httpViaBroker(
+    GMAIL_HOST,
+    'GET',
+    `/gmail/v1/users/me/messages?q=${enc(FINANCE_QUERY)}&maxResults=${max}`,
+  );
+  if (searchRes.status < 200 || searchRes.status >= 300) {
+    throw new Error(`gmail search HTTP ${searchRes.status}`);
+  }
+  let searchJson;
+  try {
+    searchJson = JSON.parse(searchRes.body);
+  } catch {
+    throw new Error('invalid JSON from gmail search');
+  }
+  const ids = (searchJson.messages ?? []).map((m) => m.id).filter(Boolean);
+  if (ids.length === 0) return '';
+  let out = '';
+  for (const id of ids) {
+    const getRes = await httpViaBroker(
+      GMAIL_HOST,
+      'GET',
+      `/gmail/v1/users/me/messages/${enc(id)}?format=metadata` +
+        `&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`,
+    );
+    if (getRes.status < 200 || getRes.status >= 300) continue;
+    let json;
+    try {
+      json = JSON.parse(getRes.body);
+    } catch {
+      continue;
+    }
+    const headers = json.payload?.headers ?? [];
+    const h = (n) => decodeMimeWords(headers.find((x) => x.name === n)?.value ?? '?');
+    const text = `From: ${h('From')}\nDate: ${h('Date')}\nSubject: ${h('Subject')}\n\n${json.snippet ?? ''}`;
+    out += `---MSG ${id}---\n${text}\n\n`;
+  }
+  return out;
+}
+
+/** tool → {host, реквест, выжимка ответа} или Promise<string> для multi-step. */
 const TOOLS = {
   gmail_list: {
     description: 'List recent Gmail message ids (read-only)',
@@ -111,7 +184,7 @@ const TOOLS = {
         `&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`,
       summarize: (json) => {
         const headers = json.payload?.headers ?? [];
-        const h = (n) => headers.find((x) => x.name === n)?.value ?? '?';
+        const h = (n) => decodeMimeWords(headers.find((x) => x.name === n)?.value ?? '?');
         return `From: ${h('From')}\nDate: ${h('Date')}\nSubject: ${h('Subject')}\n\n${json.snippet ?? ''}`;
       },
     }),
@@ -162,20 +235,65 @@ const TOOLS = {
       summarize: (json) => `event created: ${json.id ?? '?'}`,
     }),
   },
+  gmail_finance_fetch: {
+    description: 'Fetch receipt-like messages for finance ingest (read-only)',
+    run: (a) => gmailFinanceFetch(a),
+  },
+  drive_list: {
+    description: 'List Drive files (read-only)',
+    run: (a) => ({
+      host: CAL_HOST,
+      method: 'GET',
+      path:
+        `/drive/v3/files?pageSize=${maxResults(a)}` +
+        `&fields=files(id,name,mimeType,modifiedTime)`,
+      summarize: fileLines,
+    }),
+  },
+  drive_search: {
+    description: 'Search Drive files (read-only)',
+    run: (a) => ({
+      host: CAL_HOST,
+      method: 'GET',
+      path:
+        `/drive/v3/files?q=${enc(need(a, 'q'))}&pageSize=${maxResults(a)}` +
+        `&fields=files(id,name,mimeType)`,
+      summarize: fileLines,
+    }),
+  },
+  drive_get_text: {
+    description: 'Read small text file or export Google Doc as plain text (read-only)',
+    run: (a) => ({
+      host: CAL_HOST,
+      method: 'GET',
+      path: `/drive/v3/files/${enc(need(a, 'id'))}?alt=media`,
+      summarize: (_json, raw) => {
+        const text = typeof raw === 'string' ? raw : '';
+        return text.length > 4000 ? `${text.slice(0, 4000)}…` : text || '(empty)';
+      },
+      rawBody: true,
+    }),
+  },
 };
 
 async function callTool(params) {
   const tool = TOOLS[params?.name];
   if (!tool) return errResult(`unknown tool: ${params?.name}`);
-  let spec;
+  let specOrText;
   try {
-    spec = tool.run(params.arguments ?? {});
+    specOrText = await tool.run(params.arguments ?? {});
   } catch (err) {
     return errResult(err instanceof Error ? err.message : String(err));
   }
+  if (typeof specOrText === 'string') {
+    return {
+      content: [{ type: 'text', text: specOrText.length === 0 ? 'no messages' : specOrText }],
+    };
+  }
+  const spec = specOrText;
   let res;
   try {
-    res = await httpViaBroker(spec.host, spec.method, spec.path, spec.body);
+    res = await httpViaBroker(spec.host, spec.method, spec.path, spec.body, spec.httpOpts);
   } catch (err) {
     return errResult(`broker unreachable: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -183,6 +301,10 @@ async function callTool(params) {
     return errResult('HTTP 401 from broker — google token not ready (check oauth-sidecar)');
   }
   if (res.status < 200 || res.status >= 300) return errResult(`HTTP ${res.status}`);
+  if (spec.rawBody) {
+    const text = spec.summarize({}, res.body);
+    return { content: [{ type: 'text', text }] };
+  }
   let json = {};
   try {
     json = JSON.parse(res.body);

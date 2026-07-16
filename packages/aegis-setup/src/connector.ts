@@ -248,6 +248,108 @@ export function mergeEnvoy(
   return { yaml: out, changed: true };
 }
 
+function lineIndent(line: string): number {
+  const m = /^(\s*)/.exec(line);
+  return m?.[1]?.length ?? 0;
+}
+
+/** Удаляет все маркерные блоки пресета из envoy.yaml (vhost/cluster/listener). */
+export function removeConnectorBlocks(yaml: string, name: string): string {
+  const tags = [marker(name), listenerMarker(name)];
+  const lines = yaml.split('\n');
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i]!;
+    const trimmed = line.trimStart();
+    if (tags.some((t) => trimmed === t)) {
+      const indent = lineIndent(line);
+      i++;
+      if (i < lines.length && lineIndent(lines[i]!) === indent && lines[i]!.trimStart().startsWith('- ')) {
+        i++;
+        while (i < lines.length) {
+          const cur = lines[i]!;
+          if (cur.trim().length === 0) {
+            i++;
+            continue;
+          }
+          const ind = lineIndent(cur);
+          if (ind <= indent && cur.trimStart().startsWith('- ')) break;
+          if (ind <= indent && tags.some((t) => cur.trimStart() === t)) break;
+          i++;
+        }
+      }
+      continue;
+    }
+    out.push(line);
+    i++;
+  }
+  return out.join('\n');
+}
+
+export function diffText(oldText: string, newText: string): string[] {
+  const oldLines = oldText.split('\n');
+  const newLines = newText.split('\n');
+  const out: string[] = [];
+  const max = Math.max(oldLines.length, newLines.length);
+  for (let i = 0; i < max; i++) {
+    const o = oldLines[i] ?? '';
+    const n = newLines[i] ?? '';
+    if (o !== n) out.push(`@@ line ${i + 1}`);
+    if (o !== n && o.length > 0) out.push(`- ${o}`);
+    if (o !== n && n.length > 0) out.push(`+ ${n}`);
+  }
+  return out;
+}
+
+export interface UpgradeResult {
+  readonly name: string;
+  readonly skillUpdated: boolean;
+  readonly routesUpdated: number;
+  readonly envoyDiff: readonly string[];
+  readonly skillDiff: readonly string[];
+}
+
+/** Sprint 26: переустановка пресета — envoy-блоки заменяются, навык перезаписывается. */
+export function upgradeConnector(root: string, preset: ConnectorPreset): UpgradeResult {
+  const paths = resolveInstallPaths(root);
+  let routesUpdated = 0;
+  let envoyDiff: string[] = [];
+  let skillUpdated = false;
+  let skillDiff: string[] = [];
+
+  if (preset.skill) {
+    const target = join(root, 'skills', preset.name);
+    const skillMd = readFileSync(join(preset.dir, 'SKILL.md'), 'utf8');
+    const manifest = readFileSync(join(preset.dir, 'manifest.json'), 'utf8');
+    mkdirSync(target, { recursive: true });
+    const oldSkill = existsSync(join(target, 'SKILL.md'))
+      ? readFileSync(join(target, 'SKILL.md'), 'utf8')
+      : '';
+    const oldManifest = existsSync(join(target, 'manifest.json'))
+      ? readFileSync(join(target, 'manifest.json'), 'utf8')
+      : '';
+    writeFileSync(join(target, 'SKILL.md'), skillMd, 'utf8');
+    writeFileSync(join(target, 'manifest.json'), manifest, 'utf8');
+    skillDiff = [...diffText(oldSkill, skillMd), ...diffText(oldManifest, manifest)];
+    skillUpdated = skillDiff.length > 0;
+  }
+
+  const totalRoutes = preset.broker_routes.length + (preset.broker_listener?.routes.length ?? 0);
+  if (totalRoutes > 0 && existsSync(paths.brokerEnvoy)) {
+    const before = readFileSync(paths.brokerEnvoy, 'utf8');
+    const stripped = removeConnectorBlocks(before, preset.name);
+    const merged = mergeEnvoy(stripped, preset);
+    if (merged.yaml !== before) {
+      writeFileSync(paths.brokerEnvoy, merged.yaml, 'utf8');
+      routesUpdated = totalRoutes;
+      envoyDiff = diffText(before, merged.yaml);
+    }
+  }
+
+  return { name: preset.name, skillUpdated, routesUpdated, envoyDiff, skillDiff };
+}
+
 export interface ApplyResult {
   readonly name: string;
   readonly skillInstalled: boolean;
@@ -297,8 +399,15 @@ export function checkEnvoyRoutes(yaml: string): { ok: boolean; detail: string } 
   const names = new Set(matches.map((m) => m[1] ?? ''));
   const broken: string[] = [];
   for (const name of names) {
+    const hasListener = matches.some((m) => m[1] === name && m[2] === ' listener');
     const paired = matches.filter((m) => m[1] === name && m[2] === undefined).length;
-    if (paired % 2 !== 0) broken.push(`${name}: unpaired marker (vhost/cluster mismatch)`);
+    if (hasListener) {
+      // Listener-only пресет (C4/C5): кластеры живут внутри listener-блока без парных
+      // vhost-маркеров на :8080 — достаточно, что ссылки cluster → cluster_name сходятся ниже.
+      if (paired === 0) broken.push(`${name}: listener preset has no cluster markers`);
+    } else if (paired % 2 !== 0) {
+      broken.push(`${name}: unpaired marker (vhost/cluster mismatch)`);
+    }
   }
   const referenced = [...yaml.matchAll(/(?<!_)cluster: (conn-[a-z0-9-]+)/g)].map((m) => m[1]!);
   const defined = new Set([...yaml.matchAll(/cluster_name: (conn-[a-z0-9-]+)/g)].map((m) => m[1]!));
@@ -339,7 +448,35 @@ export function runConnector(root: string, args: readonly string[]): number {
   }
 
   if (sub !== 'add' || names.length === 0) {
-    console.error('Usage: aegis-setup connector [list | add <name…>]');
+    if (sub === 'upgrade' && names.length > 0) {
+      for (const name of names) {
+        let result: UpgradeResult;
+        try {
+          result = upgradeConnector(root, loadPreset(connectorsDir, name));
+        } catch (err) {
+          console.error(err instanceof Error ? err.message : String(err));
+          return 1;
+        }
+        console.log(
+          `${name}: skill ${result.skillUpdated ? 'updated' : 'unchanged'}, broker routes ${
+            result.routesUpdated > 0 ? `updated (${result.routesUpdated})` : 'unchanged'
+          }`,
+        );
+        if (result.envoyDiff.length > 0) {
+          console.log('\n--- deploy/broker/envoy.yaml diff (excerpt) ---');
+          for (const line of result.envoyDiff.slice(0, 60)) console.log(line);
+          if (result.envoyDiff.length > 60) console.log(`... (${result.envoyDiff.length - 60} more lines)`);
+        }
+        if (result.skillDiff.length > 0) {
+          console.log('\n--- skills diff (excerpt) ---');
+          for (const line of result.skillDiff.slice(0, 40)) console.log(line);
+          if (result.skillDiff.length > 40) console.log(`... (${result.skillDiff.length - 40} more lines)`);
+        }
+      }
+      console.log('\nNext: aegis-setup verify');
+      return 0;
+    }
+    console.error('Usage: aegis-setup connector [list | add <name…> | upgrade <name…>]');
     return 1;
   }
 

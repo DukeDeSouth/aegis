@@ -230,6 +230,7 @@ export class TelegramAdapter implements ChannelAdapter {
             kind: 'approved_action',
             token: c.token,
             session_id: `${TG_SESSION_PREFIX}${c.chatId}`,
+            ...(c.totpCode ? { totp_code: c.totpCode } : {}),
           }),
           'owner',
         );

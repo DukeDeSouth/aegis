@@ -18,7 +18,7 @@ import { TelegramAdapter } from './adapter/adapter.ts';
 import { DiscordAdapter } from './adapter/discord/adapter.ts';
 import { LiveDiscordClient } from './adapter/discord/client.ts';
 import { EmailInputAdapter } from './adapter/email/adapter.ts';
-import { NullEmailFetcher } from './adapter/email/fetcher.ts';
+import { NullEmailFetcher, BrokerHttpEmailFetcher } from './adapter/email/fetcher.ts';
 import { ChannelState } from './adapter/state.ts';
 import { TelegramClient } from './adapter/telegram-client.ts';
 import { AuditLog } from './audit/log.ts';
@@ -90,6 +90,7 @@ async function main(): Promise<void> {
   applyMigration(queueDb, migrationSql('0004-budget.sql'), 4);
   applyMigration(queueDb, migrationSql('0005-queue.sql'), 5);
   applyMigration(queueDb, migrationSql('0008-queue.sql'), 8);
+  applyMigration(queueDb, migrationSql('0009-queue.sql'), 9);
   applyMigration(memoryDb, migrationSql('0001-memory.sql'), 1);
   applyMigration(memoryDb, migrationSql('0002-memory.sql'), 2);
   applyMigration(memoryDb, migrationSql('0006-memory.sql'), 6);
@@ -103,6 +104,9 @@ async function main(): Promise<void> {
   const quarantine = new QuarantineProcessor(qLlm, {
     maxTokens: config.llm.q_llm.max_tokens,
   });
+  const channelState = new ChannelState(queueDb);
+  const totpRef = config.gate?.second_factor?.totp_secret_ref;
+  const totpSecret = totpRef !== undefined ? process.env[totpRef] : undefined;
   const pending = new PendingStore(queueDb);
   const reminders = new ReminderStore(queueDb);
   const workspace = new WorkspaceStore(workspaceDir);
@@ -150,6 +154,7 @@ async function main(): Promise<void> {
   const webFetcher = new SandboxWebFetcher(sandbox, {
     brokerHost: webCfg.broker_host,
     maxResponseBytes: webCfg.max_response_kb * 1024,
+    workspaceDir,
   });
   const mcpServers = loadMcpRegistry(config.mcp);
   const mcpNodeImage =
@@ -198,6 +203,11 @@ async function main(): Promise<void> {
     ...(config.budget?.notify_session_id !== undefined
       ? { ownerNotifySessionId: config.budget.notify_session_id }
       : {}),
+    channelState,
+    ...(config.gate?.second_factor !== undefined
+      ? { secondFactor: config.gate.second_factor }
+      : {}),
+    ...(totpSecret !== undefined && totpSecret.length > 0 ? { totpSecret } : {}),
   });
   const scheduleEntries: ScheduleEntry[] = config.schedules.map((s) => ({
     id: s.id,
@@ -216,7 +226,6 @@ async function main(): Promise<void> {
   const tgClient = new TelegramClient(config.telegram.bot_token_ref, {
     pollTimeoutS: config.telegram.poll_timeout_s,
   });
-  const channelState = new ChannelState(queueDb);
   const adapter = new TelegramAdapter(
     tgClient,
     queues,
@@ -236,8 +245,14 @@ async function main(): Promise<void> {
     : undefined;
 
   const emailPollMs = (config.email?.poll_interval_s ?? 60) * 1000;
+  const emailFetcher = config.email?.imap_bridge_host
+    ? new BrokerHttpEmailFetcher(config.email.imap_bridge_host)
+    : new NullEmailFetcher();
+  if (config.email && !config.email.imap_bridge_host) {
+    console.warn('email: imap_bridge_host unset — no mail fetched (deploy/broker/imap-bridge/)');
+  }
   const emailAdapter = config.email
-    ? new EmailInputAdapter(new NullEmailFetcher(), queues, audit, channelState, {
+    ? new EmailInputAdapter(emailFetcher, queues, audit, channelState, {
         sessionId: config.email.session_id,
         pollMs: emailPollMs,
       })

@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { validateManifestFile } from '../../src/skills/validate.ts';
 
 const CONNECTORS_DIR = join(process.cwd(), 'connectors');
-const PRESETS = ['google', 'notes', 'rss', 'search', 'weather'];
+const PRESETS = ['caldav', 'finance', 'github', 'google', 'homeassistant', 'notes', 'notion', 'rss', 'search', 'watch', 'weather'];
 
 describe('connector presets', () => {
   it('каждый пресет — полный комплект файлов', () => {
@@ -46,9 +46,61 @@ describe('connector presets', () => {
         expect(listener.includes(forbidden), `${name}: ${forbidden}`).toBe(false);
       }
       delete meta.broker_listener;
+      delete meta.config_hints;
       const rest = JSON.stringify(meta);
       expect(/token|api_key|secret/i.test(rest.replace(/API key/g, '')), name).toBe(false);
     }
+  });
+
+  it('homeassistant (C4): lock_unlock irreversible; сервер без Authorization', () => {
+    const meta = JSON.parse(
+      readFileSync(join(CONNECTORS_DIR, 'homeassistant', 'connector.json'), 'utf8'),
+    ) as { config_hints: string[] };
+    const mcpHint = meta.config_hints.find((h) => h.includes('"transport"')) ?? '';
+    expect(mcpHint).toContain('{"name": "lock_unlock", "action_class": "irreversible"}');
+    expect(mcpHint).toContain('{"name": "states_list", "action_class": "read-only"}');
+    expect(mcpHint).toContain('"server_dir": "./connectors/homeassistant/server"');
+    const server = readFileSync(
+      join(CONNECTORS_DIR, 'homeassistant', 'server', 'server.mjs'),
+      'utf8',
+    );
+    expect(/['"]?authorization['"]?\s*:/i.test(server)).toBe(false);
+    expect(server).toContain('aegis-broker:8082');
+  });
+
+  it('github (C5): pr_merge irreversible; сервер без Authorization', () => {
+    const meta = JSON.parse(
+      readFileSync(join(CONNECTORS_DIR, 'github', 'connector.json'), 'utf8'),
+    ) as { config_hints: string[] };
+    const mcpHint = meta.config_hints.find((h) => h.includes('"transport"')) ?? '';
+    expect(mcpHint).toContain('{"name": "pr_merge", "action_class": "irreversible"}');
+    expect(mcpHint).toContain('{"name": "issues_list", "action_class": "read-only"}');
+    expect(mcpHint).toContain('"server_dir": "./connectors/github/server"');
+    const server = readFileSync(join(CONNECTORS_DIR, 'github', 'server', 'server.mjs'), 'utf8');
+    expect(/['"]?authorization['"]?\s*:/i.test(server)).toBe(false);
+    expect(server).toContain('aegis-broker:8083');
+  });
+
+  it('caldav (C7): task_delete irreversible; сервер без Authorization', () => {
+    const meta = JSON.parse(
+      readFileSync(join(CONNECTORS_DIR, 'caldav', 'connector.json'), 'utf8'),
+    ) as { config_hints: string[] };
+    const mcpHint = meta.config_hints.find((h) => h.includes('"transport"')) ?? '';
+    expect(mcpHint).toContain('{"name": "task_delete", "action_class": "irreversible"}');
+    const server = readFileSync(join(CONNECTORS_DIR, 'caldav', 'server', 'server.mjs'), 'utf8');
+    expect(/['"]?authorization['"]?\s*:/i.test(server)).toBe(false);
+    expect(server).toContain('aegis-broker:8084');
+  });
+
+  it('notion (C7): page_archive irreversible; сервер без Authorization', () => {
+    const meta = JSON.parse(
+      readFileSync(join(CONNECTORS_DIR, 'notion', 'connector.json'), 'utf8'),
+    ) as { config_hints: string[] };
+    const mcpHint = meta.config_hints.find((h) => h.includes('"transport"')) ?? '';
+    expect(mcpHint).toContain('{"name": "page_archive", "action_class": "irreversible"}');
+    const server = readFileSync(join(CONNECTORS_DIR, 'notion', 'server', 'server.mjs'), 'utf8');
+    expect(/['"]?authorization['"]?\s*:/i.test(server)).toBe(false);
+    expect(server).toContain('aegis-broker:8085');
   });
 
   it('google (C1): классы действий в hint — send строго irreversible', () => {
@@ -59,6 +111,8 @@ describe('connector presets', () => {
     expect(mcpHint).toContain('{"name": "gmail_send", "action_class": "irreversible"}');
     expect(mcpHint).toContain('{"name": "gmail_draft", "action_class": "reversible"}');
     expect(mcpHint).toContain('{"name": "gmail_list", "action_class": "read-only"}');
+    expect(mcpHint).toContain('{"name": "drive_list", "action_class": "read-only"}');
+    expect(mcpHint).toContain('{"name": "gmail_finance_fetch", "action_class": "read-only"}');
     expect(mcpHint).toContain('"server_dir": "./connectors/google/server"');
     // Сервер пресета существует и не выставляет Authorization по построению (V2):
     // ловим присваивание заголовка, комментарии со словом не в счёт.

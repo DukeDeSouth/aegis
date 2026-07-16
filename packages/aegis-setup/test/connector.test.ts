@@ -22,6 +22,8 @@ import {
   loadPreset,
   mergeEnvoy,
   marker,
+  removeConnectorBlocks,
+  upgradeConnector,
 } from '../src/connector.ts';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -44,7 +46,7 @@ function makeRoot(name: string): string {
 describe('connector presets', () => {
   it('репо содержит пресеты волн 1 и 2', () => {
     const names = listPresets(join(REPO_ROOT, 'connectors'));
-    expect(names).toEqual(['google', 'notes', 'rss', 'search', 'weather']);
+    expect(names).toEqual(['github', 'google', 'homeassistant', 'notes', 'rss', 'search', 'watch', 'weather']);
   });
 
   it('add устанавливает skill и broker-маршруты; повторный add — no-op', () => {
@@ -168,6 +170,54 @@ describe('connector presets', () => {
     );
   });
 
+  it('homeassistant (Sprint 25): listener :8082, ha_token изолирован от broker_token', () => {
+    const root = makeRoot('r11');
+    const preset = loadPreset(join(root, 'connectors'), 'homeassistant');
+    applyConnector(root, preset);
+    const envoy = readFileSync(join(root, 'deploy', 'broker', 'envoy.yaml'), 'utf8');
+    expect(envoy).toContain('# connector:homeassistant listener');
+    expect(envoy).toContain('port_value: 8082');
+    expect(envoy).toContain('name: ha_token');
+    expect(envoy).toContain('path: /etc/broker/ha/secret.yaml');
+    expect(envoy).toContain("domains: ['homeassistant.local', 'homeassistant.local:*']");
+    const listenerBlock = envoy.slice(
+      envoy.indexOf('# connector:homeassistant listener'),
+      envoy.indexOf('- name: llm'),
+    );
+    expect(listenerBlock).not.toContain('broker_token');
+    expect(checkEnvoyRoutes(envoy).ok).toBe(true);
+  });
+
+  it('github (Sprint 25): listener :8083, github_token изолирован', () => {
+    const root = makeRoot('r12');
+    const preset = loadPreset(join(root, 'connectors'), 'github');
+    applyConnector(root, preset);
+    const envoy = readFileSync(join(root, 'deploy', 'broker', 'envoy.yaml'), 'utf8');
+    expect(envoy).toContain('# connector:github listener');
+    expect(envoy).toContain('port_value: 8083');
+    expect(envoy).toContain('name: github_token');
+    expect(envoy).toContain('path: /etc/broker/github/secret.yaml');
+    expect(envoy).toContain("domains: ['api.github.com', 'api.github.com:*']");
+    const listenerBlock = envoy.slice(
+      envoy.indexOf('# connector:github listener'),
+      envoy.indexOf('- name: llm'),
+    );
+    expect(listenerBlock).not.toContain('broker_token');
+    expect(checkEnvoyRoutes(envoy).ok).toBe(true);
+  });
+
+  it('волна 1 + C4/C5: google, homeassistant, github без конфликтов портов', () => {
+    const root = makeRoot('r13');
+    for (const name of ['weather', 'google', 'homeassistant', 'github']) {
+      applyConnector(root, loadPreset(join(root, 'connectors'), name));
+    }
+    const envoy = readFileSync(join(root, 'deploy', 'broker', 'envoy.yaml'), 'utf8');
+    expect(checkEnvoyRoutes(envoy).ok).toBe(true);
+    expect(envoy).toContain('port_value: 8081');
+    expect(envoy).toContain('port_value: 8082');
+    expect(envoy).toContain('port_value: 8083');
+  });
+
   it('checkEnvoyRoutes: валидный merge — ok, битый маршрут — FAIL', () => {
     const root = makeRoot('r6');
     applyConnector(root, loadPreset(join(root, 'connectors'), 'weather'));
@@ -179,5 +229,42 @@ describe('connector presets', () => {
     const res = checkEnvoyRoutes(broken);
     expect(res.ok).toBe(false);
     expect(res.detail).toContain('conn-weather-0');
+  });
+
+  it('watch (Sprint 26): skill-only preset, envoy не тронут', () => {
+    const root = makeRoot('r14');
+    const before = readFileSync(join(root, 'deploy', 'broker', 'envoy.yaml'), 'utf8');
+    const res = applyConnector(root, loadPreset(join(root, 'connectors'), 'watch'));
+    expect(res.skillInstalled).toBe(true);
+    expect(res.routesAdded).toBe(0);
+    expect(readFileSync(join(root, 'deploy', 'broker', 'envoy.yaml'), 'utf8')).toBe(before);
+  });
+
+  it('upgrade: перезаписывает skill и идемпотентен', () => {
+    const root = makeRoot('r15');
+    applyConnector(root, loadPreset(join(root, 'connectors'), 'weather'));
+    writeFileSync(join(root, 'skills', 'weather', 'SKILL.md'), '# stale\n');
+
+    const first = upgradeConnector(root, loadPreset(join(root, 'connectors'), 'weather'));
+    expect(first.skillUpdated).toBe(true);
+    expect(readFileSync(join(root, 'skills', 'weather', 'SKILL.md'), 'utf8')).toContain('Weather');
+
+    const envoyAfter = readFileSync(join(root, 'deploy', 'broker', 'envoy.yaml'), 'utf8');
+    expect(checkEnvoyRoutes(envoyAfter).ok).toBe(true);
+
+    const second = upgradeConnector(root, loadPreset(join(root, 'connectors'), 'weather'));
+    expect(second.skillUpdated).toBe(false);
+    expect(second.routesUpdated).toBe(0);
+    expect(second.envoyDiff).toEqual([]);
+    expect(readFileSync(join(root, 'deploy', 'broker', 'envoy.yaml'), 'utf8')).toBe(envoyAfter);
+  });
+
+  it('removeConnectorBlocks удаляет маркерные блоки', () => {
+    const root = makeRoot('r16');
+    applyConnector(root, loadPreset(join(root, 'connectors'), 'weather'));
+    const envoy = readFileSync(join(root, 'deploy', 'broker', 'envoy.yaml'), 'utf8');
+    const stripped = removeConnectorBlocks(envoy, 'weather');
+    expect(stripped).not.toContain(marker('weather'));
+    expect(stripped).not.toContain('conn-weather-0');
   });
 });

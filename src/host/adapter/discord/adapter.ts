@@ -123,7 +123,12 @@ export class DiscordAdapter implements ChannelAdapter {
       case 'approve_attempt':
         this.queues.publish(
           'inbound',
-          JSON.stringify({ kind: 'approved_action', token: c.token, session_id: session }),
+          JSON.stringify({
+            kind: 'approved_action',
+            token: c.token,
+            session_id: session,
+            ...(c.totpCode ? { totp_code: c.totpCode } : {}),
+          }),
           'owner',
         );
         break;

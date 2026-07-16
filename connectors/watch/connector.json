@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "name": "watch",
+  "description": "Price and page change monitoring via /watch and workspace snapshots (C8)",
+  "skill": true,
+  "broker_routes": [],
+  "config_hints": [
+    "Add HTTPS URLs to monitor in skills/watch/SKILL.md (one per line)",
+    "cron example: { \"id\": \"price-check\", \"cron\": \"*/30\", \"text\": \"/watch https://shop.example/item\", \"session_id\": \"tg:YOUR_CHAT_ID\" }",
+    "First /watch saves a baseline silently; later runs notify only when content or price changes"
+  ]
+}

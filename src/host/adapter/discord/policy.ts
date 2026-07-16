@@ -4,12 +4,12 @@
 export type DiscordClassified =
   | { kind: 'owner_text'; channelId: string; authorId: string; text: string }
   | { kind: 'pair_attempt'; channelId: string; authorId: string; code: string }
-  | { kind: 'approve_attempt'; channelId: string; token: string }
+  | { kind: 'approve_attempt'; channelId: string; token: string; totpCode?: string }
   | { kind: 'stranger' }
   | { kind: 'ignored' };
 
 const PAIR_RE = /^\/pair\s+(\S+)$/;
-const APPROVE_RE = /^\/approve\s+(\S+)$/;
+const APPROVE_RE = /^\/approve\s+(\S+)(?:\s+(\d{6}))?$/;
 
 export interface DiscordMessage {
   readonly id: string;
@@ -30,7 +30,14 @@ export function classifyDiscordMessage(
   }
   if (ownerId !== undefined && msg.author.id === ownerId) {
     const approve = APPROVE_RE.exec(msg.content.trim());
-    if (approve?.[1]) return { kind: 'approve_attempt', channelId: msg.channel_id, token: approve[1] };
+    if (approve?.[1]) {
+      return {
+        kind: 'approve_attempt',
+        channelId: msg.channel_id,
+        token: approve[1],
+        ...(approve[2] ? { totpCode: approve[2] } : {}),
+      };
+    }
     if (msg.content.length > 0) {
       return { kind: 'owner_text', channelId: msg.channel_id, authorId: msg.author.id, text: msg.content };
     }
