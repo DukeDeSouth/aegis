@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "name": "content-calendar",
+  "description": "Weekly content plan draft via C13 analytics + /research (C16)",
+  "skill": true,
+  "broker_routes": [],
+  "config_hints": [
+    "requires social connector (C13) for post analytics",
+    "weekly cron: { \"id\": \"content-calendar\", \"cron\": \"Mon 09:00\", \"text\": \"Content calendar: pull top posts from last week via /mcp social analytics; run /research trending topics in niche; draft weekly plan to workspace/content/calendar-YYYY-Www.md with slots Mon–Sun\", \"session_id\": \"webchat:local\" }"
+  ]
+}

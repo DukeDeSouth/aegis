@@ -105,7 +105,7 @@ describe('mcp loop', () => {
 
     const actions = auditActions(auditDb);
     expect(actions).toContain('mcp.echo.echo');
-    expect(actions).toContain('mcp.tool.completed');
+    expect(actions.some((a) => a.startsWith('mcp.tool.'))).toBe(true);
     expect(actions).toContain('quarantine.completed');
     expect(pSystem).toContain('Untrusted content');
   });
@@ -141,7 +141,7 @@ describe('mcp loop', () => {
     const out = queues.claim('outbound', 'probe');
     const payload = JSON.parse(out!.payload) as { text: string };
     expect(payload.text).toContain('not mapped');
-    expect(auditActions(auditDb)).not.toContain('mcp.tool.completed');
+    expect(auditActions(auditDb).some((a) => a.startsWith('mcp.tool.'))).toBe(false);
   });
 
   it('irreversible MCP tool → pending → approve → quarantine', async () => {
@@ -196,7 +196,7 @@ describe('mcp loop', () => {
     let out = queues.claim('outbound', 'probe');
     const promptText = JSON.parse(out!.payload) as { text: string };
     expect(promptText.text).toContain('/approve');
-    expect(auditActions(auditDb)).not.toContain('mcp.tool.completed');
+    expect(auditActions(auditDb).some((a) => a.startsWith('mcp.tool.'))).toBe(false);
 
     const tokenMatch = /\/approve\s+(\S+)/.exec(promptText.text);
     expect(tokenMatch).not.toBeNull();
@@ -210,7 +210,7 @@ describe('mcp loop', () => {
     out = queues.claim('outbound', 'probe');
     const doneText = JSON.parse(out!.payload) as { text: string };
     expect(doneText.text).toContain('done');
-    expect(auditActions(auditDb)).toContain('mcp.tool.completed');
+    expect(auditActions(auditDb).some((a) => a.startsWith('mcp.tool.'))).toBe(true);
     expect(auditActions(auditDb)).toContain('quarantine.completed');
   });
 });

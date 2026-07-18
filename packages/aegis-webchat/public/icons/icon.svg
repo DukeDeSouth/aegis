@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="AEGIS">
+  <rect width="512" height="512" rx="96" fill="#1a2030"/>
+  <path fill="#9ecbff" d="M128 160h256v48H128zm0 96h200v48H128zm0 96h160v48H128z"/>
+  <circle cx="384" cy="352" r="40" fill="#6ee7a0"/>
+</svg>

@@ -113,12 +113,15 @@ function fileLines(json) {
 const FINANCE_QUERY =
   'newer_than:30d (subject:receipt OR subject:invoice OR subject:order OR subject:чек OR subject:счёт)';
 
-async function gmailFinanceFetch(args) {
+const TRAVEL_QUERY =
+  'newer_than:60d (subject:flight OR subject:booking OR subject:hotel OR subject:reservation OR subject:рейс OR subject:бронь OR subject:отель)';
+
+async function gmailBodiesFetch(args, query) {
   const max = maxResults(args);
   const searchRes = await httpViaBroker(
     GMAIL_HOST,
     'GET',
-    `/gmail/v1/users/me/messages?q=${enc(FINANCE_QUERY)}&maxResults=${max}`,
+    `/gmail/v1/users/me/messages?q=${enc(query)}&maxResults=${max}`,
   );
   if (searchRes.status < 200 || searchRes.status >= 300) {
     throw new Error(`gmail search HTTP ${searchRes.status}`);
@@ -152,6 +155,14 @@ async function gmailFinanceFetch(args) {
     out += `---MSG ${id}---\n${text}\n\n`;
   }
   return out;
+}
+
+async function gmailFinanceFetch(args) {
+  return gmailBodiesFetch(args, FINANCE_QUERY);
+}
+
+async function gmailTravelFetch(args) {
+  return gmailBodiesFetch(args, TRAVEL_QUERY);
 }
 
 /** tool → {host, реквест, выжимка ответа} или Promise<string> для multi-step. */
@@ -238,6 +249,10 @@ const TOOLS = {
   gmail_finance_fetch: {
     description: 'Fetch receipt-like messages for finance ingest (read-only)',
     run: (a) => gmailFinanceFetch(a),
+  },
+  gmail_travel_fetch: {
+    description: 'Fetch travel confirmation messages for travel ingest (read-only)',
+    run: (a) => gmailTravelFetch(a),
   },
   drive_list: {
     description: 'List Drive files (read-only)',

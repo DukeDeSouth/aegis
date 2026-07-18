@@ -58,9 +58,31 @@ export function sessionSignature(rows: EpisodeRow[]): string {
     .join('>');
 }
 
+/** L3: contiguous command-chain signatures in a session token list. */
+export function extractContiguousChains(
+  tokens: string[],
+  minLen: number,
+  maxLen: number,
+): string[] {
+  const out = new Set<string>();
+  for (let i = 0; i < tokens.length; i++) {
+    for (let len = minLen; len <= maxLen && i + len <= tokens.length; len++) {
+      const slice = tokens.slice(i, i + len);
+      const caps = slice.filter((t) => CAP_SET.has(t));
+      if (caps.length < 2) continue;
+      out.add(`chain:${slice.join('>')}`);
+    }
+  }
+  return [...out];
+}
+
+function signatureBody(signature: string): string {
+  return signature.startsWith('chain:') ? signature.slice(6) : signature;
+}
+
 export function capabilitiesFromSignature(signature: string): CapabilityId[] {
   const caps = new Set<CapabilityId>();
-  for (const part of signature.split('>')) {
+  for (const part of signatureBody(signature).split('>')) {
     if (CAP_SET.has(part)) caps.add(part as CapabilityId);
   }
   if (caps.size === 0) caps.add('memory.read');
@@ -131,6 +153,21 @@ export class SkillProposalRunner {
   }
 
   detect(): SkillProposalHit[] {
+    const sessionHits = this.detectSessionRepeats();
+    const chainHits = this.learning.skill_chain_detection_enabled ? this.detectChainRepeats() : [];
+    const merged = new Map<string, SkillProposalHit>();
+    for (const hit of [...sessionHits, ...chainHits]) {
+      merged.set(hit.signature, hit);
+    }
+    for (const sig of [...merged.keys()]) {
+      if (!sig.startsWith('chain:') && merged.has(`chain:${sig}`)) {
+        merged.delete(sig);
+      }
+    }
+    return [...merged.values()];
+  }
+
+  private detectSessionRepeats(): SkillProposalHit[] {
     const since = this.now() - this.windowMs;
     const sessions = this.db
       .prepare(
@@ -147,6 +184,37 @@ export class SkillProposalRunner {
       bySig.set(sig, list);
     }
 
+    return this.hitsFromGroups(bySig);
+  }
+
+  private detectChainRepeats(): SkillProposalHit[] {
+    const minLen = this.learning.skill_chain_min_length;
+    const maxLen = Math.max(minLen, this.learning.skill_chain_max_length);
+    const since = this.now() - this.windowMs;
+    const sessions = this.db
+      .prepare(
+        `SELECT DISTINCT session_id FROM episodes WHERE role = 'owner' AND created_at >= ?`,
+      )
+      .all(since) as { session_id: string }[];
+
+    const bySig = new Map<string, string[]>();
+    for (const { session_id } of sessions) {
+      const rows = this.episodes
+        .listBySession(session_id, 200)
+        .filter((r) => r.role === 'owner')
+        .sort((a, b) => a.createdAt - b.createdAt);
+      const tokens = rows.map((r) => episodeActionToken(r.content));
+      for (const sig of extractContiguousChains(tokens, minLen, maxLen)) {
+        const list = bySig.get(sig) ?? [];
+        list.push(session_id);
+        bySig.set(sig, list);
+      }
+    }
+
+    return this.hitsFromGroups(bySig);
+  }
+
+  private hitsFromGroups(bySig: Map<string, string[]>): SkillProposalHit[] {
     const hits: SkillProposalHit[] = [];
     for (const [signature, sessionIds] of bySig) {
       if (sessionIds.length < this.threshold) continue;
@@ -304,6 +372,13 @@ export class SkillProposalRunner {
     caps: CapabilityId[],
     samples: EpisodeRow[],
   ): { skillMd: string; manifest: SkillManifest } {
+    const chainParts = hit.signature.startsWith('chain:')
+      ? signatureBody(hit.signature).split('>')
+      : null;
+    const procedure =
+      chainParts !== null
+        ? this.chainProcedureMarkdown(chainParts, samples)
+        : '';
     const lines = samples
       .slice(0, 6)
       .map((e) => `- [${e.sessionId}] ${e.content.slice(0, 120)}`);
@@ -315,6 +390,7 @@ description: Auto-detected repeated task (${hit.count} sessions)
 # ${hit.skillName}
 
 Detected signature: \`${hit.signature}\`
+${procedure}
 
 ## Sample episodes
 
@@ -331,6 +407,51 @@ ${lines.join('\n')}
       entrypoints: [],
     };
     return { skillMd, manifest };
+  }
+
+  private chainProcedureMarkdown(chainParts: string[], samples: EpisodeRow[]): string {
+    const steps: string[] = [];
+    for (const sid of [...new Set(samples.map((s) => s.sessionId))].slice(0, 2)) {
+      const rows = this.episodes
+        .listBySession(sid, 50)
+        .filter((r) => r.role === 'owner')
+        .sort((a, b) => a.createdAt - b.createdAt);
+      let step = 1;
+      let idx = 0;
+      const lines: string[] = [];
+      while (idx < rows.length) {
+        const token = episodeActionToken(rows[idx]!.content);
+        if (token === chainParts[0]) {
+          let matched = true;
+          for (let j = 1; j < chainParts.length; j++) {
+            const next = rows[idx + j];
+            if (!next || episodeActionToken(next.content) !== chainParts[j]) {
+              matched = false;
+              break;
+            }
+          }
+          if (matched) {
+            for (let j = 0; j < chainParts.length; j++) {
+              lines.push(`${step}. \`${rows[idx + j]!.content.trim().slice(0, 120)}\``);
+              step++;
+            }
+            idx += chainParts.length;
+            continue;
+          }
+        }
+        idx++;
+      }
+      if (lines.length > 0) {
+        steps.push(...lines);
+        break;
+      }
+    }
+    if (steps.length === 0) {
+      for (let i = 0; i < chainParts.length; i++) {
+        steps.push(`${i + 1}. capability \`${chainParts[i]}\``);
+      }
+    }
+    return `\n## Procedure (auto-detected chain)\n\n${steps.join('\n')}\n`;
   }
 
   private async generateWithLlm(

@@ -144,29 +144,63 @@ Google/Microsoft/Notion живут на OAuth2 с коротким access-token.
 
 Спрос подтверждён (бюджет-агенты, счета из почты). Наша версия — принципиально **read-only**: детект счетов/сумм из C1-почты, журнал расходов в workspace, месячный отчёт по cron. Движение денег не маппится (см. эталон классов) — это позиционная граница, а не недоделка.
 
+### C20. Travel-брифинг read-only
+
+**Статус (Sprint 36):** реализовано — пресет `connectors/travel` (skill + `parse_travel.sh` / `fetch_flight.sh` / `build_brief.sh`); ядро: `/travel-ingest` (MCP `gmail_travel_fetch` → `workspace/travel/bookings.jsonl`) и `/travel-brief [FLIGHT]` (aviationstack через broker listener `:8087` + `deploy/broker/travel/proxy.mjs`). Бронирования и оплаты не выполняются.
+
 ### C10. Мост n8n/Zapier
 
-**Статус: DEFER (Sprint 29+)** — решение Sprint 28: отложить до метрик волны 1–2. Критерий revisit: ≥3 активных коннектора у установки + явный user-story на webhook-автоматизации.
+**Статус: NO-GO (Sprint 30)** — отложено до Sprint 32+; приоритет ниже каналов C12 и метрик волны 1. Решение: не расширять attack surface generic webhook-мостом, пока нет явного спроса и маппинга классов на стороне владельца.
 
 Один коннектор → 400+ приложений; популярен (52k+ установок у OpenClaw). Риск: за webhook'ом n8n может стоять что угодно, классы не выводимы. Правило: **каждый workflow маппится владельцем отдельно**, дефолт — irreversible; ответы — quarantine. Дёшево (generic HTTP MCP-tool + маршрут), но включать после волны 1.
 
 ### C11. Browser automation (Playwright MCP)
 
-**Статус: DEFER (Sprint 29+)** — JS-render покрыт `/fetch` + C8; Playwright — cookie/login surface. Revisit при доказанном gap в research/watch метриках.
+**Статус: NO-GO (Sprint 30)** — отложено до Sprint 32+; revisit при gap в research/watch метриках и отдельном sandbox-контуре.
 
 №1 по поиску в MCP-экосистеме, но самая опасная поверхность (интерактивные сессии = куки/логины). Если делать: headless-браузер в отдельном sandbox-контейнере, сеть только через broker, только read-сценарии (рендер JS-страниц для C2/C8), никаких логинов в первой версии. Решение об очерёдности — после метрик использования волны 1.
 
-### C12. Каналы Slack / Matrix / Signal
+### C12. Каналы Slack / Matrix / Signal / WebChat
 
-Это продолжение F10 (каналы, не коннекторы) — по одному, только официальные API, поверх `ChannelAdapter`. Приоритет по запросам пользователей; Matrix/Signal резонируют с privacy-ЦА.
+Это продолжение F10 (**каналы, не коннекторы**) — по одному, только официальные API, поверх `ChannelAdapter`. Канал — граница авторизации (pairing, provenance, `/approve`), поэтому живёт в ядре, а не в `connectors/`. Сейчас реализованы: Telegram (Sprint 2), Discord DM (Sprint 20), email-as-input (Sprint 20/26).
 
-**Статус: Sprint 29 (Matrix)** — первый канал волны C12; Slack/Signal — Sprint 30+ по запросу.
+**Статус: Sprint 29 WebChat → Sprint 30 Matrix → Sprint 31 Slack реализован** — см. SPRINTS.md.
+
+- **WebChat** (Sprint 29) — **реализован**: локальный канал `http://127.0.0.1:8790`, pairing через UI, long-poll outbound; UI в `packages/aegis-webchat/`.
+- **Matrix** (Sprint 30) — **реализован**: Client-Server API `/sync` long-poll, DM-only v1, pairing `/pair`, sessions `matrix:{roomId}`; credentials в trust-домене хоста (`AEGIS_MATRIX_*`).
+- **Slack** (Sprint 31) — **реализован**: Socket Mode (исходящее WS, без публичного endpoint), DM-only v1, pairing `/pair`, sessions `slack:{channelId}`; `AEGIS_SLACK_BOT_TOKEN` + `AEGIS_SLACK_APP_TOKEN` в trust-домене хоста.
+- **Signal** — **не делаем**: `signal-cli` и прочие неофициальные клиенты противоречат правилу «только официальные API» (MITM/ban surface). Остаётся в бэклоге до появления официального bot-API; для владельца — Matrix-бридж на его стороне (см. Matrix выше).
+- **WhatsApp / iMessage — не делаем** (см. ниже): Meta с 2026-01-15 запрещает general-purpose ассистентов в WhatsApp (ChatGPT/Perplexity/Copilot отключены), неофициальные транспорты (Baileys) банят номера; iMessage — только приватные API с Full Disk Access на Mac. «29 каналов» OpenClaw в значительной части стоят на этих хрупких транспортах — наше правило «только официальные API» здесь подтверждено рынком.
+
+### C13. Social publishing (Postiz)
+
+**Статус (Sprint 32): реализовано** — `connectors/social`: self-hosted [Postiz](https://docs.postiz.com/) Public API через broker listener :8086; один API key у broker (platform OAuth в Postiz UI). Tools: `integrations_list`, `analytics_summary` — read-only; `post_draft`, `post_schedule` — reversible; `post_publish`, `post_delete` — irreversible → `/approve`. Автономный DM/outreach не маппится. ADR-0020.
+
+### C15. Inbox-триаж
+
+**Статус (Sprint 32): реализовано** — `connectors/inbox-triage`: skill-only cron-композиция C1 (Gmail search → categorize → `workspace/inbox/today.md` → `gmail_draft`, never `gmail_send` без approve). Без кода ядра.
+
+### C16. Контент-календарь
+
+**Статус (Sprint 33): реализовано** — `connectors/content-calendar`: skill-only cron-композиция C13 (post analytics) + `/research` → драфт плана в `workspace/content/`. Без кода ядра.
+
+### C17. Медиатека (Jellyfin / Radarr / Sonarr)
+
+**Статус (Sprint 34): реализовано** — `connectors/medialibrary`: три broker listener (:8087 Jellyfin, :8088 Radarr, :8089 Sonarr), 12 MCP tools. Поиск/статус — read-only; постановка в очередь — reversible; удаление — irreversible. `deploy/broker/{jellyfin,radarr,sonarr}/`. Расширение `aegis-setup`: `broker_listeners[]`, `credential_header`.
+
+### C18. Закладки (linkding)
+
+**Статус (Sprint 34): реализовано** — `connectors/bookmarks`: broker listener :8090, tools `linkding_save`, `linkding_search`, `linkding_list_unread`. Еженедельный дайджест — композиция с C6 (RSS) в SKILL.md.
+
+### C19. Список покупок / меню
+
+**Статус (Sprint 34): реализовано** — `connectors/shopping-list`: skill-only композиция workspace-списков + C8 (`/watch`) + драфт заказа; без broker.
 
 ## Чего сознательно НЕ делаем
 
 - **Composio-паттерн** (токены в чужом managed-OAuth облаке) — прямое нарушение V2. Наш эквивалент удобства — `aegis-setup connector add` + OAuth-sidecar broker.
 - **Crypto-трейдинг / переводы денег** (Crypto Portfolio Monitor OpenClaw торгует автоматически) — необратимые финансовые эффекты от LLM-решений вне модели угроз.
-- **Неофициальные API** (WhatsApp-scraping, iMessage-хаки) — баны и MITM-поверхность (позиция ROADMAP).
+- **Неофициальные API** (WhatsApp-scraping, iMessage-хаки, **Signal via `signal-cli`**) — баны и MITM-поверхность (позиция ROADMAP). Подтверждено рынком: с 2026-01-15 Meta запрещает general-purpose ассистентов даже на официальном WhatsApp Business API, а номера на Baileys-транспорте банятся. Легальный путь для владельца — Matrix-бриджи на его стороне (C12).
 - **Динамическая установка коннекторов из чата** — только `aegis-setup` на хосте владельцем (инвариант F8 «никакой установки MCP из чата» распространяется).
 - **Гонка за количеством**: практика показывает 3–7 активных серверов на установку; цель — 10–12 вылизанных пресетов, не каталог тысяч.
 

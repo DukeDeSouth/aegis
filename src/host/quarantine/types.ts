@@ -3,7 +3,7 @@
  */
 import { z } from 'zod';
 
-export const QUARANTINE_SOURCES = ['forwarded', 'attachment', 'web', 'mcp', 'email'] as const;
+export const QUARANTINE_SOURCES = ['forwarded', 'attachment', 'voice', 'web', 'mcp', 'email'] as const;
 export type QuarantineSource = (typeof QUARANTINE_SOURCES)[number];
 
 export const quarantineContentSchema = z

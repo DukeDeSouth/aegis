@@ -16,7 +16,12 @@
   ],
   "learning": {
     "self_improvement_llm_enabled": false,
-    "min_reuse_rate": 0
+    "min_reuse_rate": 0,
+    "memory_consolidation_enabled": false,
+    "consolidation_batch_size": 25,
+    "research_deep_enabled": false,
+    "research_deep_branch_count": 3,
+    "research_deep_token_cap": 12000
   },
   "memory": {
     "context": {
@@ -32,7 +37,8 @@
     "broker_host": "aegis-broker:8080"
   },
   "sandbox": {
-    "workspace_dir": "./workspace"
+    "workspace_dir": "./workspace",
+    "runtime": "docker"
   },
   "mcp": {
     "servers": []

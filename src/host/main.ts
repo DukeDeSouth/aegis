@@ -9,6 +9,7 @@ import { OpenAiCompatClient } from '../llm/client.ts';
 import { EpisodeStore } from '../memory/episodes.ts';
 import { KnowledgeStore } from '../memory/knowledge.ts';
 import { CurationRunner } from '../memory/curation.ts';
+import { ConsolidationRunner } from '../memory/consolidation.ts';
 import { PromotionGate } from '../memory/promotion.ts';
 import { MemorySnapshot } from '../memory/snapshot.ts';
 import { KnowledgeVerifier } from '../memory/verifier.ts';
@@ -19,6 +20,13 @@ import { DiscordAdapter } from './adapter/discord/adapter.ts';
 import { LiveDiscordClient } from './adapter/discord/client.ts';
 import { EmailInputAdapter } from './adapter/email/adapter.ts';
 import { NullEmailFetcher, BrokerHttpEmailFetcher } from './adapter/email/fetcher.ts';
+import { WebChatAdapter } from './adapter/webchat/adapter.ts';
+import { WEBCHAT_DEFAULT_SESSION } from './adapter/channel.ts';
+import { episodesToHistoryMessages } from './adapter/webchat/history.ts';
+import { MatrixAdapter } from './adapter/matrix/adapter.ts';
+import { LiveMatrixClient } from './adapter/matrix/client.ts';
+import { SlackAdapter } from './adapter/slack/adapter.ts';
+import { LiveSlackClient } from './adapter/slack/client.ts';
 import { ChannelState } from './adapter/state.ts';
 import { TelegramClient } from './adapter/telegram-client.ts';
 import { AuditLog } from './audit/log.ts';
@@ -33,6 +41,7 @@ import { computeSkillReuseMetrics } from '../skills/metrics.ts';
 import { QuarantineProcessor } from './quarantine/processor.ts';
 import { QueueStore } from './queue/store.ts';
 import { SandboxWebFetcher } from './web/fetcher.ts';
+import { SandboxVoiceTranscriber, SandboxVoiceSynthesizer } from './adapter/voice.ts';
 import { WebCacheStore } from '../memory/web-cache.ts';
 import { DockerSandboxRunner } from '../sandbox/runner.ts';
 import { SkillDryRun } from '../skills/dry-run.ts';
@@ -45,6 +54,12 @@ import { WorkspaceStore } from './workspace.ts';
 import { loadMcpRegistry } from '../mcp/registry.ts';
 import { DelegatingMcpRunner, SandboxMcpRunner } from '../mcp/sandbox-runner.ts';
 import { HttpMcpRunner, StdioMcpRunner } from '../mcp/runner.ts';
+import {
+  createHealthServer,
+  sdNotifyReady,
+  sdNotifyWatchdog,
+  type HealthState,
+} from './health.ts';
 
 function loadConfig(): ReturnType<typeof configSchema.parse> {
   const path = process.env.AEGIS_CONFIG ?? './aegis.config.json';
@@ -91,10 +106,15 @@ async function main(): Promise<void> {
   applyMigration(queueDb, migrationSql('0005-queue.sql'), 5);
   applyMigration(queueDb, migrationSql('0008-queue.sql'), 8);
   applyMigration(queueDb, migrationSql('0009-queue.sql'), 9);
+  applyMigration(queueDb, migrationSql('0010-queue.sql'), 10);
+  applyMigration(queueDb, migrationSql('0011-queue.sql'), 11);
+  applyMigration(queueDb, migrationSql('0012-queue.sql'), 12);
+  applyMigration(queueDb, migrationSql('0013-queue.sql'), 13);
   applyMigration(memoryDb, migrationSql('0001-memory.sql'), 1);
   applyMigration(memoryDb, migrationSql('0002-memory.sql'), 2);
   applyMigration(memoryDb, migrationSql('0006-memory.sql'), 6);
   applyMigration(memoryDb, migrationSql('0007-memory.sql'), 7);
+  applyMigration(memoryDb, migrationSql('0014-memory.sql'), 14);
   applyMigration(auditDb, migrationSql('0001-audit.sql'), 1);
 
   const queues = new QueueStore(queueDb);
@@ -117,6 +137,10 @@ async function main(): Promise<void> {
   const verifier = new KnowledgeVerifier(memoryDb, knowledge, { promotion });
   const snapshot = new MemorySnapshot(memoryDb, memoryPath, snapshotsDir);
   const curation = new CurationRunner(memoryDb, knowledge, promotion, snapshot);
+  const consolidation = new ConsolidationRunner(knowledge, promotion, snapshot, qLlm, {
+    batchSize: config.learning.consolidation_batch_size,
+    maxTokens: config.llm.q_llm.max_tokens,
+  });
   const skills = new SkillRegistry(config.skills_dir);
   const skillInstaller = new SkillInstaller({
     skillsDir: config.skills_dir,
@@ -127,6 +151,7 @@ async function main(): Promise<void> {
     image: process.env.AEGIS_SANDBOX_IMAGE ?? 'alpine:3.20',
     internalNetwork: process.env.AEGIS_INTERNAL_NETWORK ?? 'aegis-internal',
     workspaceDir,
+    runtime: config.sandbox?.runtime ?? 'docker',
   });
   const skillDryRun = new SkillDryRun({
     registry: skills,
@@ -155,6 +180,9 @@ async function main(): Promise<void> {
     brokerHost: webCfg.broker_host,
     maxResponseBytes: webCfg.max_response_kb * 1024,
     workspaceDir,
+    ...(process.env.AEGIS_MEDIA_SANDBOX_IMAGE !== undefined
+      ? { mediaImage: process.env.AEGIS_MEDIA_SANDBOX_IMAGE }
+      : {}),
   });
   const mcpServers = loadMcpRegistry(config.mcp);
   const mcpNodeImage =
@@ -174,12 +202,36 @@ async function main(): Promise<void> {
         reserveForOwner: config.budget.reserve_for_owner,
       })
     : undefined;
+  const healthCfg = config.health ?? {
+    enabled: true,
+    host: '127.0.0.1' as const,
+    port: 8791,
+    stale_threshold_ms: 30_000,
+    systemd_notify: true,
+  };
+  const healthState: HealthState = { startedAt: Date.now(), lastTickAt: null };
+  const healthServer =
+    healthCfg.enabled
+      ? createHealthServer({
+          host: healthCfg.host,
+          port: healthCfg.port,
+          state: healthState,
+          staleThresholdMs: healthCfg.stale_threshold_ms,
+        })
+      : undefined;
+  if (healthServer) {
+    healthServer.listen(healthCfg.port, healthCfg.host);
+  }
+
   const orchestrator = new Orchestrator(queues, audit, llm, pending, {
     episodes,
     knowledge,
     promotion,
     verifier,
     curation,
+    consolidation,
+    qLlm,
+    qMaxTokens: config.llm.q_llm.max_tokens,
     quarantine,
     skills,
     skillInstaller,
@@ -204,10 +256,29 @@ async function main(): Promise<void> {
       ? { ownerNotifySessionId: config.budget.notify_session_id }
       : {}),
     channelState,
+    pairedChannels: () => ({
+      telegram: channelState.getOwnerUserId() !== undefined,
+      discord: channelState.getDiscordOwnerId() !== undefined,
+      webchat: channelState.isWebchatPaired(),
+      matrix: channelState.getMatrixOwnerUserId() !== undefined,
+      slack: channelState.getSlackOwnerUserId() !== undefined,
+    }),
     ...(config.gate?.second_factor !== undefined
       ? { secondFactor: config.gate.second_factor }
       : {}),
     ...(totpSecret !== undefined && totpSecret.length > 0 ? { totpSecret } : {}),
+    ...(process.env.AEGIS_MEDIA_SANDBOX_IMAGE !== undefined
+      ? {
+          voiceSynthesizer: new SandboxVoiceSynthesizer({
+            runner: sandbox,
+            mediaImage: process.env.AEGIS_MEDIA_SANDBOX_IMAGE,
+          }),
+        }
+      : {}),
+    onLoopTick: () => {
+      healthState.lastTickAt = Date.now();
+      if (healthCfg.systemd_notify) sdNotifyWatchdog();
+    },
   });
   const scheduleEntries: ScheduleEntry[] = config.schedules.map((s) => ({
     id: s.id,
@@ -232,6 +303,16 @@ async function main(): Promise<void> {
     audit,
     channelState,
     config.telegram.pairing_code_ref,
+    {
+      voiceTranscriber: new SandboxVoiceTranscriber({
+        runner: sandbox,
+        workspaceDir,
+        ...(process.env.AEGIS_MEDIA_SANDBOX_IMAGE !== undefined
+          ? { mediaImage: process.env.AEGIS_MEDIA_SANDBOX_IMAGE }
+          : {}),
+      }),
+      workspaceDir,
+    },
   );
 
   const discordAdapter = config.discord
@@ -258,16 +339,58 @@ async function main(): Promise<void> {
       })
     : undefined;
 
+  const webchatCfg = config.webchat;
+  const webchatAdapter =
+    webchatCfg?.enabled !== false && webchatCfg !== undefined
+      ? new WebChatAdapter(queues, audit, channelState, webchatCfg.pairing_code_ref, {
+          host: webchatCfg.host,
+          port: webchatCfg.port,
+          listSkills: () => skills.listForPrompt(),
+          getHistory: (limit) =>
+            episodesToHistoryMessages(episodes.tailBySession(WEBCHAT_DEFAULT_SESSION, limit)),
+        })
+      : undefined;
+
+  const matrixAdapter = config.matrix
+    ? new MatrixAdapter(
+        new LiveMatrixClient(config.matrix.homeserver_ref, config.matrix.access_token_ref),
+        queues,
+        audit,
+        channelState,
+        config.matrix.pairing_code_ref,
+      )
+    : undefined;
+
+  const slackAdapter = config.slack
+    ? new SlackAdapter(
+        new LiveSlackClient(config.slack.bot_token_ref, config.slack.app_token_ref),
+        queues,
+        audit,
+        channelState,
+        config.slack.pairing_code_ref,
+      )
+    : undefined;
+
   const ac = new AbortController();
   process.on('SIGINT', () => ac.abort());
   process.on('SIGTERM', () => ac.abort());
 
   audit.append({ actor: 'host', action: 'host.started', decision: 'info' });
+  if (healthCfg.systemd_notify) sdNotifyReady();
   console.log(`aegis host started (data: ${config.data_dir}); orchestrator + adapters`);
+  if (healthServer) {
+    console.log(`health: http://${healthCfg.host}:${healthCfg.port}/health`);
+  }
 
   const runners = [orchestrator.run(ac.signal), adapter.run(ac.signal), scheduler.run(ac.signal)];
   if (discordAdapter) runners.push(discordAdapter.run(ac.signal));
   if (emailAdapter) runners.push(emailAdapter.run(ac.signal));
+  if (webchatAdapter) {
+    runners.push(webchatAdapter.run(ac.signal));
+    console.log(`webchat: http://${webchatCfg!.host}:${webchatCfg!.port}`);
+  }
+  if (matrixAdapter) runners.push(matrixAdapter.run(ac.signal));
+  if (slackAdapter) runners.push(slackAdapter.run(ac.signal));
   await Promise.all(runners);
 
   audit.append({ actor: 'host', action: 'host.stopped', decision: 'info' });

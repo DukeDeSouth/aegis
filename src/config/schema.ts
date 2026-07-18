@@ -42,6 +42,31 @@ export const emailInputSchema = z
   })
   .strict();
 
+export const webchatSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    host: z.literal('127.0.0.1').default('127.0.0.1'),
+    port: z.number().int().min(1).max(65535).default(8790),
+    pairing_code_ref: keyRef.default('AEGIS_WEBCHAT_PAIRING_CODE'),
+  })
+  .strict();
+
+export const matrixSchema = z
+  .object({
+    homeserver_ref: keyRef.default('AEGIS_MATRIX_HOMESERVER'),
+    access_token_ref: keyRef.default('AEGIS_MATRIX_ACCESS_TOKEN'),
+    pairing_code_ref: keyRef.default('AEGIS_MATRIX_PAIRING_CODE'),
+  })
+  .strict();
+
+export const slackSchema = z
+  .object({
+    bot_token_ref: keyRef.default('AEGIS_SLACK_BOT_TOKEN'),
+    app_token_ref: keyRef.default('AEGIS_SLACK_APP_TOKEN'),
+    pairing_code_ref: keyRef.default('AEGIS_SLACK_PAIRING_CODE'),
+  })
+  .strict();
+
 export const scheduleSchema = z
   .object({
     id: z.string().min(1),
@@ -69,9 +94,20 @@ export const learningSchema = z
     /** F5: повторов задачи для предложения draft-навыка. */
     skill_proposal_threshold: z.number().int().min(2).default(3),
     skill_proposal_window_days: z.number().int().min(1).default(14),
+    /** L3 (Sprint 35): детект повторяющихся цепочек команд. */
+    skill_chain_detection_enabled: z.boolean().default(true),
+    skill_chain_min_length: z.number().int().min(2).max(4).default(2),
+    skill_chain_max_length: z.number().int().min(2).max(4).default(3),
     /** F6: дней без использования → кандидат на архив. */
     skill_curator_stale_days: z.number().int().min(1).default(30),
     skill_curator_min_success_rate: z.number().min(0).max(1).default(0.5),
+    /** L1 (Sprint 37): Q-LLM memory consolidation via /consolidate. */
+    memory_consolidation_enabled: z.boolean().default(false),
+    consolidation_batch_size: z.number().int().min(2).max(50).default(25),
+    /** L2 (Sprint 38): parallel /research-deep sub-agents. */
+    research_deep_enabled: z.boolean().default(false),
+    research_deep_branch_count: z.number().int().min(2).max(5).default(3),
+    research_deep_token_cap: z.number().int().min(1000).default(12000),
   })
   .strict();
 
@@ -109,6 +145,8 @@ export const sandboxSchema = z
   .object({
     /** Выделенная rw-директория workspace (F4); по умолчанию data_dir/workspace. */
     workspace_dir: z.string().min(1).optional(),
+    /** Sandbox runtime: docker (default) или gVisor runsc на Linux (ADR-0006, Sprint 40). */
+    runtime: z.enum(['docker', 'gvisor']).default('docker'),
   })
   .strict();
 
@@ -126,6 +164,17 @@ export const secondFactorSchema = z
 export const gateSchema = z
   .object({
     second_factor: secondFactorSchema.optional(),
+  })
+  .strict();
+
+export const healthSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    host: z.literal('127.0.0.1').default('127.0.0.1'),
+    port: z.number().int().min(1).max(65535).default(8791),
+    /** Считать loop мёртвым если tick старше N мс (2× poll по умолчанию). */
+    stale_threshold_ms: z.number().int().min(1000).default(30_000),
+    systemd_notify: z.boolean().default(true),
   })
   .strict();
 
@@ -190,8 +239,16 @@ export const configSchema = z
       min_reuse_rate: 0,
       skill_proposal_threshold: 3,
       skill_proposal_window_days: 14,
+      skill_chain_detection_enabled: true,
+      skill_chain_min_length: 2,
+      skill_chain_max_length: 3,
       skill_curator_stale_days: 30,
       skill_curator_min_success_rate: 0.5,
+      memory_consolidation_enabled: false,
+      consolidation_batch_size: 25,
+      research_deep_enabled: false,
+      research_deep_branch_count: 3,
+      research_deep_token_cap: 12000,
     }),
     memory: memorySchema.optional(),
     web: webSchema.optional(),
@@ -207,6 +264,10 @@ export const configSchema = z
     telegram: telegramSchema,
     discord: discordSchema.optional(),
     email: emailInputSchema.optional(),
+    webchat: webchatSchema.optional(),
+    matrix: matrixSchema.optional(),
+    slack: slackSchema.optional(),
+    health: healthSchema.optional(),
   })
   .strict();
 
@@ -215,6 +276,9 @@ export type LlmProfile = z.infer<typeof llmProfileSchema>;
 export type TelegramConfig = z.infer<typeof telegramSchema>;
 export type DiscordConfig = z.infer<typeof discordSchema>;
 export type EmailInputConfig = z.infer<typeof emailInputSchema>;
+export type WebchatConfig = z.infer<typeof webchatSchema>;
+export type MatrixConfig = z.infer<typeof matrixSchema>;
+export type SlackConfig = z.infer<typeof slackSchema>;
 export type BudgetConfig = z.infer<typeof budgetSchema>;
 export type ScheduleConfig = z.infer<typeof scheduleSchema>;
 export type LearningConfig = z.infer<typeof learningSchema>;
@@ -228,3 +292,4 @@ export type McpStdioServerConfig = z.infer<typeof mcpStdioServerSchema>;
 export type McpHttpServerConfig = z.infer<typeof mcpHttpServerSchema>;
 export type GateConfig = z.infer<typeof gateSchema>;
 export type SecondFactorConfig = z.infer<typeof secondFactorSchema>;
+export type HealthConfig = z.infer<typeof healthSchema>;

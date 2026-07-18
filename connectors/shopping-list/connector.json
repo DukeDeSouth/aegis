@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "name": "shopping-list",
+  "description": "Grocery list + price watch composition (C19)",
+  "skill": true,
+  "broker_routes": [],
+  "config_hints": [
+    "uses workspace/shopping/list.md + C8 /watch for price tracking",
+    "cron: { \"id\": \"shopping-review\", \"cron\": \"Sat 11:00\", \"text\": \"Review workspace/shopping/list.md; /watch price URLs; draft order summary to workspace/shopping/order-draft.md\", \"session_id\": \"webchat:local\" }"
+  ]
+}

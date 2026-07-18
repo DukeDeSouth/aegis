@@ -5,6 +5,8 @@
 *.key
 credentials.json
 secrets/
+deploy/**/token.txt
+deploy/**/secrets/
 
 # Локальное состояние агента
 /data/

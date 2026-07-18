@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "name": "bookmarks",
+  "description": "linkding read-later bookmarks (C18)",
+  "skill": true,
+  "broker_routes": [],
+  "broker_listener": {
+    "port": 8090,
+    "secret_name": "linkding_token",
+    "sds_path": "/etc/broker/linkding/secret.yaml",
+    "credential_header": "authorization",
+    "header_value_prefix": "Token ",
+    "routes": [
+      {
+        "host": "linkding.local",
+        "cluster_address": "127.0.0.1",
+        "cluster_port": 9090,
+        "tls": false
+      }
+    ]
+  },
+  "config_hints": [
+    "linkding REST token → deploy/broker/linkding/token.txt; set cluster to your linkding host",
+    "Karakeep alternate: same pattern with host karakeep.local if self-hosted",
+    "weekly digest cron: { \"id\": \"bookmarks-weekly\", \"cron\": \"Sun 10:00\", \"text\": \"List unread bookmarks via /mcp bookmarks bookmark_list; write digest to workspace/bookmarks/unread.md\", \"session_id\": \"webchat:local\" }",
+    "mcp server → { \"name\": \"bookmarks\", \"transport\": \"stdio\", \"command\": [\"node\", \"server.mjs\"], \"server_dir\": \"./connectors/bookmarks/server\", \"allowed_hosts\": [\"aegis-broker\"], \"tools\": [ {\"name\": \"bookmark_save\", \"action_class\": \"reversible\"}, {\"name\": \"bookmark_list\", \"action_class\": \"read-only\"}, {\"name\": \"bookmark_delete\", \"action_class\": \"irreversible\"} ] }"
+  ]
+}

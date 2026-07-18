@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "name": "social",
+  "description": "Social publishing via self-hosted Postiz Public API (C13)",
+  "skill": true,
+  "broker_routes": [],
+  "broker_listener": {
+    "port": 8086,
+    "secret_name": "postiz_token",
+    "sds_path": "/etc/broker/social/secret.yaml",
+    "header_value_prefix": "",
+    "routes": [
+      {
+        "host": "postiz.local",
+        "cluster_address": "127.0.0.1",
+        "cluster_port": 5000,
+        "tls": false
+      }
+    ]
+  },
+  "config_hints": [
+    "Deploy Postiz separately (AGPL-3); connect platforms in Postiz UI — not in AEGIS",
+    "Set cluster_address/port to your Postiz backend; API key → deploy/broker/social/api-key.txt (0600)",
+    "mcp server → { \"name\": \"social\", \"transport\": \"stdio\", \"command\": [\"node\", \"server.mjs\"], \"server_dir\": \"./connectors/social/server\", \"allowed_hosts\": [\"aegis-broker\"], \"tools\": [ {\"name\": \"integrations_list\", \"action_class\": \"read-only\"}, {\"name\": \"analytics_summary\", \"action_class\": \"read-only\"}, {\"name\": \"post_draft\", \"action_class\": \"reversible\"}, {\"name\": \"post_schedule\", \"action_class\": \"reversible\"}, {\"name\": \"post_publish\", \"action_class\": \"irreversible\"}, {\"name\": \"post_delete\", \"action_class\": \"irreversible\"} ] }",
+    "morning post queue cron: { \"id\": \"social-morning\", \"cron\": \"07:30\", \"text\": \"List scheduled posts for today via /mcp social integrations_list; summarize queue for owner review — do not publish without /approve\", \"session_id\": \"webchat:local\" }"
+  ]
+}

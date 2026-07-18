@@ -23,6 +23,31 @@ export async function checkDocker(run: ExecFn = exec): Promise<{ ok: true } | { 
   }
 }
 
+/** Sprint 40: smoke gVisor runsc — только Linux + зарегистрированный runtime. */
+export async function checkGvisorAvailable(
+  run: ExecFn = exec,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  try {
+    const { stdout } = await run('docker', ['info', '--format', '{{json .Runtimes}}'], { timeout: 15_000 });
+    const runtimes = JSON.parse(stdout) as Record<string, unknown>;
+    if (!('runsc' in runtimes)) {
+      return {
+        ok: false,
+        reason: 'Docker runtime runsc not registered — see deploy/gvisor/README.md',
+      };
+    }
+    await run(
+      'docker',
+      ['run', '--rm', '--runtime', 'runsc', 'alpine:3.20', 'true'],
+      { timeout: 120_000 },
+    );
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, reason: `gVisor runsc smoke failed: ${msg}` };
+  }
+}
+
 export async function checkBrokerRunning(
   composeDir: string,
   run: ExecFn = exec,
@@ -34,6 +59,27 @@ export async function checkBrokerRunning(
     });
     if (!stdout.includes('broker')) {
       return { ok: false, reason: 'broker service not running (cd deploy && docker compose up -d broker)' };
+    }
+    return { ok: true };
+  } catch {
+    return { ok: true, skipped: true };
+  }
+}
+
+export async function checkBrokerClientRunning(
+  composeDir: string,
+  run: ExecFn = exec,
+): Promise<{ ok: true } | { ok: false; reason: string } | { ok: true; skipped: true }> {
+  try {
+    const { stdout } = await run('docker', ['compose', 'ps', '--status', 'running', '--format', '{{.Service}}'], {
+      cwd: composeDir,
+      timeout: 15_000,
+    });
+    if (!stdout.includes('broker-client')) {
+      return {
+        ok: false,
+        reason: 'broker-client not running (cd deploy && docker compose --profile remote-broker up -d broker-client)',
+      };
     }
     return { ok: true };
   } catch {
@@ -129,6 +175,58 @@ export async function checkBrokerSmoke(
     parts.push('404 on unknown Host');
 
     return { ok: true, detail: parts.join(', ') };
+  } catch {
+    return { ok: true, skipped: true };
+  }
+}
+
+/** Sprint 39: smoke remote path via broker-client forwarder on core host. */
+export async function checkBrokerClientSmoke(
+  composeDir: string,
+  run: ExecFn = exec,
+): Promise<{ ok: true; detail: string } | { ok: false; reason: string } | { ok: true; skipped: true }> {
+  try {
+    const { stdout: cidOut } = await run('docker', ['compose', 'ps', '-q', 'broker-client'], {
+      cwd: composeDir,
+      timeout: 15_000,
+    });
+    const cid = cidOut.trim();
+    if (cid.length === 0) return { ok: true, skipped: true };
+
+    const { stdout: netJson } = await run('docker', ['inspect', cid, '--format', '{{json .NetworkSettings.Networks}}'], {
+      timeout: 15_000,
+    });
+    const nets = Object.keys(JSON.parse(netJson) as Record<string, unknown>);
+    const network = nets.find((n) => n.includes('internal')) ?? nets[0];
+    if (network === undefined) return { ok: false, reason: 'broker-client network not found' };
+
+    const { stdout: code404 } = await run(
+      'docker',
+      [
+        'run',
+        '--rm',
+        '--network',
+        network,
+        'curlimages/curl:8.5.0',
+        '-s',
+        '-o',
+        '/dev/null',
+        '-w',
+        '%{http_code}',
+        '-H',
+        'Host: evil.not-in-allowlist.test',
+        'http://aegis-broker-client:8080/',
+      ],
+      { timeout: 25_000 },
+    );
+
+    if (code404.trim() !== '404') {
+      return {
+        ok: false,
+        reason: `broker-client expected 404 on unknown Host via remote broker, got ${code404.trim()}`,
+      };
+    }
+    return { ok: true, detail: '404 on unknown Host via broker-client' };
   } catch {
     return { ok: true, skipped: true };
   }

@@ -80,6 +80,67 @@ function skillsTable(skills: SkillRow[]): string {
 <tbody>${body}</tbody></table>`;
 }
 
+function connectorsTable(
+  servers: import('./config.ts').McpServerSummary[],
+  stats: import('./config.ts').ConnectorAuditStat[],
+): string {
+  if (servers.length === 0) {
+    return '<h2>MCP connectors</h2><p class="empty">(none in aegis.config.json)</p>';
+  }
+  const statMap = new Map(stats.map((s) => [s.server, s]));
+  const body = servers
+    .map((s) => {
+      const st = statMap.get(s.name);
+      const last = st?.lastCallAt ? fmtTs(st.lastCallAt) : '—';
+      const calls = st?.callCount ?? 0;
+      return `<tr><td>${escapeHtml(s.name)}</td><td>${escapeHtml(s.transport)}</td><td>${s.toolCount}</td><td>${calls}</td><td>${escapeHtml(last)}</td></tr>`;
+    })
+    .join('');
+  return `<h2>MCP connectors</h2>
+<table><thead><tr><th>server</th><th>transport</th><th>tools</th><th>calls</th><th>last call</th></tr></thead>
+<tbody>${body}</tbody></table>
+<p class="note">Per-server call counts from audit action <code>mcp.tool.&lt;name&gt;</code>.</p>`;
+}
+
+export function renderConnectorsPage(data: DashboardData): string {
+  return `<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>AEGIS — Connectors</title>
+<style>
+body{font-family:system-ui,sans-serif;margin:1.5rem;background:#0f1115;color:#e6e8ec;line-height:1.45}
+h1{font-size:1.35rem} h2{font-size:1.05rem;margin-top:1.75rem;color:#9ecbff}
+table{border-collapse:collapse;width:100%;font-size:.85rem;margin-top:.5rem}
+th,td{border:1px solid #2a3140;padding:.35rem .5rem;text-align:left}
+th{background:#1a2030}.empty,.note{color:#94a3b8}
+footer{margin-top:2rem;font-size:.75rem;color:#64748b}
+a{color:#9ecbff}
+</style>
+</head>
+<body>
+<h1>AEGIS — MCP connectors</h1>
+<p>Generated ${escapeHtml(fmtTs(data.generatedAt))} · <a href="/">← dashboard</a></p>
+${connectorsTable(data.mcpServers, data.connectorStats)}
+<footer>Read-only · GET only</footer>
+</body>
+</html>`;
+}
+
+function hostHealthBanner(health: import('./queries.ts').HostHealthStatus): string {
+  if (health.ok) {
+    return '<p class="ok">Host: ok · loop alive</p>';
+  }
+  if (health.probeError) {
+    return `<p class="bad">Host: down · ${escapeHtml(health.probeError)}</p>`;
+  }
+  if (!health.loopAlive) {
+    const last = health.lastTickAt ? fmtTs(health.lastTickAt) : 'never';
+    return `<p class="bad">Host: degraded · loop stale (last tick ${escapeHtml(last)})</p>`;
+  }
+  return '<p class="bad">Host: unknown</p>';
+}
+
 export function renderDashboard(data: DashboardData): string {
   const cur = data.lastCuration
     ? `Snapshot #${data.lastCuration.snapshotId} (${escapeHtml(data.lastCuration.reason)}) at ${escapeHtml(fmtTs(data.lastCuration.createdAt))}`
@@ -106,6 +167,7 @@ footer{margin-top:2rem;font-size:.75rem;color:#64748b}
 <body>
 <h1>AEGIS — read-only dashboard</h1>
 <p>Generated ${escapeHtml(fmtTs(data.generatedAt))} · write surface = <strong>0</strong></p>
+${hostHealthBanner(data.hostHealth)}
 
 <h2>Metrics</h2>
 <ul>
@@ -122,6 +184,8 @@ ${queueTable('Inbound queue', data.inbound)}
 ${queueTable('Outbound queue', data.outbound)}
 ${auditSection(data.auditTail, data.auditChainOk, data.auditEntries, data.auditBrokenAtId)}
 ${skillsTable(data.skills)}
+
+<p><a href="/connectors">MCP connectors →</a></p>
 
 <footer>Read-only · bind localhost · approve only via paired channel</footer>
 </body>

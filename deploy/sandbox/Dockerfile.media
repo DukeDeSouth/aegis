@@ -1,0 +1,12 @@
+# Sprint 33: media sandbox — ffmpeg (+ whisper.cpp when model mounted).
+# Sprint 36 U2: espeak-ng TTS; optional piper binary + model mount.
+FROM alpine:3.20@sha256:765942a403d2d938911347d3d453de44e22a4d86aae9b06b5f929409e0fd16d
+
+RUN apk add --no-cache ffmpeg espeak-ng
+
+# whisper-cli optional: mount or extend image with pinned ggml model.
+# piper optional: mount binary to /usr/local/bin/piper and model to /models/.
+# Tests use MEDIA_MOCK=1 without whisper or TTS engines.
+
+USER 65534:65534
+WORKDIR /skill

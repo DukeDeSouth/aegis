@@ -1,6 +1,7 @@
 /**
  * Петля оркестратора: claim → gate → memory / LLM / human-gate / deny (Sprint 4–5).
  */
+import { randomBytes } from 'node:crypto';
 import type { LlmClient, LlmMessage } from '../../llm/types.ts';
 import { LlmError } from '../../llm/client.ts';
 import {
@@ -11,6 +12,11 @@ import {
   type MemoryContextConfig,
 } from '../../memory/context.ts';
 import type { CurationRunner } from '../../memory/curation.ts';
+import {
+  estimateResearchDeepTokens,
+  ResearchDeepRunner as ResearchDeepRunnerClass,
+} from '../research/deep.ts';
+import type { ConsolidationRunner } from '../../memory/consolidation.ts';
 import type { EpisodeStore } from '../../memory/episodes.ts';
 import type { KnowledgeStore } from '../../memory/knowledge.ts';
 import type { KnowledgeRow } from '../../memory/knowledge.ts';
@@ -55,6 +61,7 @@ import {
 } from '../gate/second-factor.ts';
 import { checkPendingApproval, approvalRejectHint } from '../gate/approve-check.ts';
 import type { ChannelState } from '../adapter/state.ts';
+import { capTtsText, type VoiceSynthesizer } from '../adapter/voice.ts';
 import type { AuditLog } from '../audit/log.ts';
 import type { QueueProvenance, QueueStore } from '../queue/store.ts';
 import {
@@ -76,6 +83,10 @@ export interface OrchestratorOptions {
   promotion?: PromotionGate;
   verifier?: KnowledgeVerifier;
   curation?: CurationRunner;
+  consolidation?: ConsolidationRunner;
+  /** L2: Q-LLM client for /research-deep decompose (Sprint 38). */
+  qLlm?: LlmClient;
+  qMaxTokens?: number;
   quarantine?: QuarantineProcessor;
   skills?: SkillRegistry;
   skillInstaller?: SkillInstaller;
@@ -104,6 +115,10 @@ export interface OrchestratorOptions {
   channelState?: ChannelState;
   /** Test hook: override paired-channel detection. */
   pairedChannels?: () => PairedChannels;
+  /** S5: called after each orchestrator poll cycle. */
+  onLoopTick?: () => void;
+  /** U2: local TTS for voice replies (Sprint 36). */
+  voiceSynthesizer?: VoiceSynthesizer;
 }
 
 const ACTOR = 'orchestrator';
@@ -113,6 +128,7 @@ const REMEMBER_PREFIX = '/remember ';
 const CORROBORATE_PREFIX = '/corroborate ';
 const VERIFY_PREFIX = '/verify ';
 const CURATE_CMD = '/curate';
+const CONSOLIDATE_CMD = '/consolidate';
 const CURATE_SKILLS_CMD = '/curate-skills';
 const SKILL_ARCHIVE_PREFIX = '/skill-archive ';
 const SKILL_UNARCHIVE_PREFIX = '/skill-unarchive ';
@@ -127,13 +143,20 @@ const SKILL_REJECT_PREFIX = '/skill-reject ';
 const SKILL_APPROVE_PREFIX = '/skill-approve ';
 const FETCH_PREFIX = '/fetch ';
 const WATCH_PREFIX = '/watch ';
+const MEDIA_TRANSCODE_PREFIX = '/media-transcode ';
 const FINANCE_INGEST_CMD = '/finance-ingest';
 const FINANCE_REPORT_PREFIX = '/finance-report';
+const TRAVEL_INGEST_CMD = '/travel-ingest';
+const TRAVEL_BRIEF_PREFIX = '/travel-brief';
 const RESEARCH_PREFIX = '/research ';
+const RESEARCH_DEEP_PREFIX = '/research-deep ';
 const DIGEST_CMD = '/digest';
 const REMIND_PREFIX = '/remind ';
 const SUMMARIZE_PREFIX = '/summarize ';
 const STATUS_CMD = '/status';
+const VOICE_REPLY_ON_CMD = '/voice-reply on';
+const VOICE_REPLY_OFF_CMD = '/voice-reply off';
+const VOICE_REPLY_TRIGGER = /ответь\s+голосом/i;
 const READ_PREFIX = '/read ';
 const WRITE_PREFIX = '/write ';
 const UNDO_FILE_PREFIX = '/undo-file ';
@@ -196,6 +219,9 @@ export class Orchestrator {
   private readonly promotion: PromotionGate | undefined;
   private readonly verifier: KnowledgeVerifier | undefined;
   private readonly curation: CurationRunner | undefined;
+  private readonly consolidation: ConsolidationRunner | undefined;
+  private readonly qLlm: LlmClient | undefined;
+  private readonly qMaxTokens: number;
   private readonly quarantine: QuarantineProcessor | undefined;
   private readonly skills: SkillRegistry | undefined;
   private readonly skillInstaller: SkillInstaller | undefined;
@@ -222,6 +248,8 @@ export class Orchestrator {
   private readonly totpSecret: string | undefined;
   private readonly channelState: ChannelState | undefined;
   private readonly pairedChannelsFn: (() => PairedChannels) | undefined;
+  private readonly onLoopTick: (() => void) | undefined;
+  private readonly voiceSynthesizer: VoiceSynthesizer | undefined;
   private readonly worker: string;
   private readonly pollMs: number;
   private readonly maxTokens: number;
@@ -244,6 +272,9 @@ export class Orchestrator {
     this.promotion = opts.promotion;
     this.verifier = opts.verifier;
     this.curation = opts.curation;
+    this.consolidation = opts.consolidation;
+    this.qLlm = opts.qLlm;
+    this.qMaxTokens = opts.qMaxTokens ?? 512;
     this.quarantine = opts.quarantine;
     this.skills = opts.skills;
     this.skillInstaller = opts.skillInstaller;
@@ -269,6 +300,8 @@ export class Orchestrator {
     this.totpSecret = opts.totpSecret;
     this.channelState = opts.channelState;
     this.pairedChannelsFn = opts.pairedChannels;
+    this.onLoopTick = opts.onLoopTick;
+    this.voiceSynthesizer = opts.voiceSynthesizer;
     this.worker = opts.worker ?? 'orchestrator-1';
     this.pollMs = opts.pollMs ?? 500;
     this.maxTokens = opts.maxTokens ?? 1024;
@@ -312,8 +345,45 @@ export class Orchestrator {
     }
   }
 
-  private publishOutbound(sessionId: string, text: string): void {
-    this.queues.publish('outbound', JSON.stringify({ text, session_id: sessionId }), 'system');
+  private publishOutbound(sessionId: string, text: string, voiceRelPath?: string): void {
+    const payload: { text: string; session_id: string; voice_rel_path?: string } = {
+      text,
+      session_id: sessionId,
+    };
+    if (voiceRelPath !== undefined) payload.voice_rel_path = voiceRelPath;
+    this.queues.publish('outbound', JSON.stringify(payload), 'system');
+  }
+
+  private wantsVoiceReply(sessionId: string, userText: string): boolean {
+    if (this.channelState?.getVoiceReply(sessionId)) return true;
+    return VOICE_REPLY_TRIGGER.test(userText);
+  }
+
+  private async publishOutboundWithVoice(
+    sessionId: string,
+    text: string,
+    userText: string,
+    provenance: QueueProvenance,
+  ): Promise<void> {
+    let voiceRel: string | undefined;
+    if (this.voiceSynthesizer && provenance === 'owner' && this.wantsVoiceReply(sessionId, userText)) {
+      voiceRel = `outgoing/${randomBytes(8).toString('hex')}.ogg`;
+      try {
+        await this.voiceSynthesizer.synthesize(capTtsText(text), voiceRel);
+      } catch (err) {
+        voiceRel = undefined;
+        this.audit.append({
+          actor: ACTOR,
+          action: 'voice.tts_failed',
+          decision: 'info',
+          payload: {
+            sessionId,
+            error: err instanceof Error ? err.message : String(err),
+          },
+        });
+      }
+    }
+    this.publishOutbound(sessionId, text, voiceRel);
   }
 
   private gatedReply(
@@ -340,6 +410,9 @@ export class Orchestrator {
       : {
           telegram: this.channelState?.getOwnerUserId() !== undefined,
           discord: this.channelState?.getDiscordOwnerId() !== undefined,
+          webchat: this.channelState?.isWebchatPaired() ?? false,
+          matrix: this.channelState?.getMatrixOwnerUserId() !== undefined,
+          slack: this.channelState?.getSlackOwnerUserId() !== undefined,
         };
     const required = resolveRequiredChannel(
       this.secondFactor,
@@ -618,6 +691,11 @@ export class Orchestrator {
       return true;
     }
 
+    if (payload.text === CONSOLIDATE_CMD) {
+      await this.handleConsolidate(msg.id, payload, msg.provenance);
+      return true;
+    }
+
     if (payload.text === CURATE_SKILLS_CMD) {
       this.handleCurateSkills(msg.id, payload, msg.provenance);
       return true;
@@ -683,6 +761,11 @@ export class Orchestrator {
       return true;
     }
 
+    if (payload.text.startsWith(MEDIA_TRANSCODE_PREFIX)) {
+      await this.handleMediaTranscode(msg.id, payload, msg.provenance);
+      return true;
+    }
+
     if (payload.text === FINANCE_INGEST_CMD) {
       await this.handleFinanceIngest(msg.id, payload, msg.provenance);
       return true;
@@ -693,8 +776,23 @@ export class Orchestrator {
       return true;
     }
 
+    if (payload.text === TRAVEL_INGEST_CMD) {
+      await this.handleTravelIngest(msg.id, payload, msg.provenance);
+      return true;
+    }
+
+    if (payload.text.startsWith(TRAVEL_BRIEF_PREFIX)) {
+      await this.handleTravelBrief(msg.id, payload, msg.provenance);
+      return true;
+    }
+
     if (payload.text.startsWith(FETCH_PREFIX)) {
       await this.handleFetch(msg.id, payload, msg.provenance);
+      return true;
+    }
+
+    if (payload.text.startsWith(RESEARCH_DEEP_PREFIX)) {
+      await this.handleResearchDeep(msg.id, payload, msg.provenance);
       return true;
     }
 
@@ -730,6 +828,16 @@ export class Orchestrator {
 
     if (payload.text === STATUS_CMD) {
       this.handleStatus(msg.id, payload, msg.provenance);
+      return true;
+    }
+
+    if (payload.text === VOICE_REPLY_ON_CMD) {
+      this.handleVoiceReplyToggle(msg.id, payload, msg.provenance, true);
+      return true;
+    }
+
+    if (payload.text === VOICE_REPLY_OFF_CMD) {
+      this.handleVoiceReplyToggle(msg.id, payload, msg.provenance, false);
       return true;
     }
 
@@ -843,7 +951,12 @@ export class Orchestrator {
         return true;
       }
 
-      this.publishOutbound(payload.session_id, reply);
+      await this.publishOutboundWithVoice(
+        payload.session_id,
+        reply,
+        payload.text,
+        msg.provenance,
+      );
       this.queues.ack(msg.id);
       this.audit.append({
         actor: ACTOR,
@@ -1039,6 +1152,56 @@ export class Orchestrator {
     this.queues.ack(messageId);
   }
 
+  private async handleMediaTranscode(
+    messageId: number,
+    payload: { text: string; session_id: string },
+    provenance: QueueProvenance,
+  ): Promise<void> {
+    const rest = payload.text.slice(MEDIA_TRANSCODE_PREFIX.length).trim();
+    const withSubs = rest.endsWith(' --subs');
+    const relPath = withSubs ? rest.slice(0, -' --subs'.length).trim() : rest;
+    if (relPath.length === 0) {
+      this.gatedReply(
+        payload.session_id,
+        provenance,
+        messageId,
+        'Usage: /media-transcode <workspace-path> [--subs]',
+      );
+      this.queues.ack(messageId);
+      return;
+    }
+    const gate = evaluate({ actionId: 'sandbox.run', provenance }, this.gateDeps);
+    this.logGate('sandbox.run', provenance, gate, { messageId, path: relPath });
+    const transcodeFn = this.webFetcher?.mediaTranscode;
+    if (gate.verdict !== 'allow' || transcodeFn === undefined) {
+      this.gatedReply(
+        payload.session_id,
+        provenance,
+        messageId,
+        'Media transcode failed: sandbox.run denied or not configured',
+      );
+      this.queues.ack(messageId);
+      return;
+    }
+    try {
+      const line = await transcodeFn.call(this.webFetcher, relPath, withSubs);
+      if (!line.startsWith('MEDIA_OK:')) {
+        throw new Error(line.startsWith('MEDIA_ERROR:') ? line : `unexpected media output: ${line}`);
+      }
+      this.audit.append({
+        actor: ACTOR,
+        action: 'media.transcoded',
+        decision: 'info',
+        payload: { messageId, path: relPath, withSubs, summary: line },
+      });
+      this.gatedReply(payload.session_id, provenance, messageId, line);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.gatedReply(payload.session_id, provenance, messageId, `Media transcode failed: ${msg}`);
+    }
+    this.queues.ack(messageId);
+  }
+
   private async handleFinanceIngest(
     messageId: number,
     payload: { text: string; session_id: string },
@@ -1122,6 +1285,222 @@ export class Orchestrator {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.gatedReply(payload.session_id, provenance, messageId, `Finance report failed: ${msg}`);
+    }
+    this.queues.ack(messageId);
+  }
+
+  private async handleTravelIngest(
+    messageId: number,
+    payload: { text: string; session_id: string },
+    provenance: QueueProvenance,
+  ): Promise<void> {
+    const actionId = 'mcp.google.gmail_travel_fetch';
+    const gate = evaluate({ actionId, provenance }, this.gateDeps);
+    this.logGate(actionId, provenance, gate, { messageId });
+    const serverCfg = findMcpServer(this.mcpServers, 'google');
+    const ingestFn = this.webFetcher?.travelIngest;
+    if (gate.verdict !== 'allow' || !this.mcpRunner || !serverCfg || ingestFn === undefined) {
+      this.gatedReply(
+        payload.session_id,
+        provenance,
+        messageId,
+        'Travel ingest failed: google MCP or workspace not configured',
+      );
+      this.queues.ack(messageId);
+      return;
+    }
+    if (!isMcpToolMapped(this.mcpServers, 'google', 'gmail_travel_fetch')) {
+      this.gatedReply(
+        payload.session_id,
+        provenance,
+        messageId,
+        'Travel ingest failed: gmail_travel_fetch not mapped in mcp.servers',
+      );
+      this.queues.ack(messageId);
+      return;
+    }
+    try {
+      const bodies = await this.mcpRunner.call(serverCfg, 'gmail_travel_fetch', { max: 20 });
+      const line = await ingestFn.call(this.webFetcher, bodies);
+      if (line.startsWith('TRAVEL_OK:')) {
+        this.audit.append({
+          actor: ACTOR,
+          action: 'travel.ingest',
+          decision: 'info',
+          payload: { messageId, summary: line },
+        });
+        this.gatedReply(payload.session_id, provenance, messageId, line);
+      } else {
+        throw new Error(line.startsWith('TRAVEL_ERROR:') ? line : `unexpected travel output: ${line}`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.gatedReply(payload.session_id, provenance, messageId, `Travel ingest failed: ${msg}`);
+    }
+    this.queues.ack(messageId);
+  }
+
+  private async handleTravelBrief(
+    messageId: number,
+    payload: { text: string; session_id: string },
+    provenance: QueueProvenance,
+  ): Promise<void> {
+    const gate = evaluate({ actionId: 'file.read', provenance }, this.gateDeps);
+    this.logGate('file.read', provenance, gate, { messageId });
+    const briefFn = this.webFetcher?.travelBrief;
+    const rest = payload.text.slice(TRAVEL_BRIEF_PREFIX.length).trim();
+    const flightIata = /^[A-Z]{2,3}\d{1,4}$/i.test(rest) ? rest.toUpperCase() : undefined;
+    if (gate.verdict !== 'allow' || briefFn === undefined) {
+      this.gatedReply(
+        payload.session_id,
+        provenance,
+        messageId,
+        'Travel brief failed: file.read denied or workspace not configured',
+      );
+      this.queues.ack(messageId);
+      return;
+    }
+    try {
+      const line = await briefFn.call(this.webFetcher, flightIata);
+      this.audit.append({
+        actor: ACTOR,
+        action: 'travel.brief',
+        decision: 'info',
+        payload: { messageId, flightIata: flightIata ?? null, summary: line },
+      });
+      this.gatedReply(payload.session_id, provenance, messageId, line);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.gatedReply(payload.session_id, provenance, messageId, `Travel brief failed: ${msg}`);
+    }
+    this.queues.ack(messageId);
+  }
+
+  /** L2 (Sprint 38): /research-deep — parallel Q branches + P synthesis. */
+  private async handleResearchDeep(
+    messageId: number,
+    payload: { text: string; session_id: string },
+    provenance: QueueProvenance,
+  ): Promise<void> {
+    const topic = payload.text.slice(RESEARCH_DEEP_PREFIX.length).trim();
+    if (provenance !== 'owner' || !this.qLlm || !this.quarantine) {
+      this.queues.ack(messageId);
+      return;
+    }
+    if (!this.learning?.research_deep_enabled) {
+      this.gatedReply(
+        payload.session_id,
+        provenance,
+        messageId,
+        'Deep research is disabled (learning.research_deep_enabled).',
+      );
+      this.queues.ack(messageId);
+      return;
+    }
+    if (topic.length === 0) {
+      this.gatedReply(payload.session_id, provenance, messageId, 'Usage: /research-deep <topic>');
+      this.queues.ack(messageId);
+      return;
+    }
+    if (this.searchUrl === undefined) {
+      this.gatedReply(
+        payload.session_id,
+        provenance,
+        messageId,
+        'Search not configured: set web.search_url (aegis-setup connector add search)',
+      );
+      this.queues.ack(messageId);
+      return;
+    }
+
+    const llmGate = evaluate({ actionId: 'llm.invoke', provenance }, this.gateDeps);
+    this.logGate('llm.invoke', provenance, llmGate, { messageId, mode: 'research_deep' });
+    if (llmGate.verdict !== 'allow') {
+      this.queues.ack(messageId);
+      return;
+    }
+
+    const branchCount = this.learning.research_deep_branch_count;
+    const estimate = estimateResearchDeepTokens(branchCount, this.qMaxTokens, this.maxTokens);
+    if (this.budget) {
+      const check = this.budget.canSpend(provenance, estimate);
+      if (!check.allowed) {
+        this.checkLlmBudget(messageId, payload, provenance);
+        return;
+      }
+    } else if (!this.checkLlmBudget(messageId, payload, provenance)) {
+      return;
+    }
+
+    const runner = new ResearchDeepRunnerClass({
+      qLlm: this.qLlm,
+      pLlm: this.llm,
+      quarantine: this.quarantine,
+      fetchDigest: async (url) => {
+        const r = await this.resolveUrlDigest(url, messageId, provenance);
+        return r.ok ? { ok: true, digest: r.digest } : { ok: false, error: r.error };
+      },
+      searchUrlTemplate: this.searchUrl,
+      branchCount,
+      maxTokensQ: this.qMaxTokens,
+      maxTokensP: this.maxTokens,
+      tokenBudgetCap: this.learning.research_deep_token_cap,
+      synthesisSystemPrefix: `${this.appendSkillsPrompt(this.systemPrompt)}\n\n${UNTRUSTED_BLOCK_HEADER}\n`,
+    });
+
+    try {
+      const result = await runner.run(topic);
+      this.budget?.recordUsage(result.usage);
+      this.audit.append({
+        actor: 'research_deep',
+        action: 'research_deep.completed',
+        decision: 'info',
+        payload: {
+          messageId,
+          topic,
+          branchesOk: result.branches.filter((b) => b.ok).length,
+          branchesTotal: result.branches.length,
+        },
+      });
+
+      const sendGate = evaluate({ actionId: 'message.send', provenance }, this.gateDeps);
+      this.logGate('message.send', provenance, sendGate, { messageId });
+      if (sendGate.verdict === 'allow') {
+        const ok = result.branches.filter((b) => b.ok).length;
+        const total = result.branches.length;
+        if (result.synthesis.length === 0) {
+          const errs = result.branches.map((b) => `${b.query}: ${b.error ?? 'failed'}`).join('; ');
+          this.publishOutbound(
+            payload.session_id,
+            `Deep research failed: all ${total} branch(es) failed. ${errs}`,
+          );
+        } else {
+          const footer =
+            ok < total ? `\n\n(${ok}/${total} branches succeeded)` : `\n\n(${ok}/${total} branches)`;
+          this.publishOutbound(payload.session_id, result.synthesis + footer);
+        }
+      }
+
+      if (this.episodes && result.synthesis.length > 0) {
+        this.episodes.append(payload.session_id, 'assistant', result.synthesis, 'orchestrator');
+      }
+    } catch (err) {
+      this.audit.append({
+        actor: 'research_deep',
+        action: 'research_deep.failed',
+        decision: 'info',
+        payload: {
+          messageId,
+          error: err instanceof Error ? err.message : String(err),
+        },
+      });
+      const sendGate = evaluate({ actionId: 'message.send', provenance }, this.gateDeps);
+      if (sendGate.verdict === 'allow') {
+        this.publishOutbound(
+          payload.session_id,
+          `Deep research failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
     this.queues.ack(messageId);
   }
@@ -1248,7 +1627,7 @@ export class Orchestrator {
     const body = await this.mcpRunner.call(serverCfg, tool, args);
     this.audit.append({
       actor: ACTOR,
-      action: 'mcp.tool.completed',
+      action: `mcp.tool.${serverCfg.name}`,
       decision: 'info',
       payload: { messageId, server: serverCfg.name, tool, bytes: body.length },
     });
@@ -1440,6 +1819,25 @@ export class Orchestrator {
         },
       });
     }
+    this.queues.ack(messageId);
+  }
+
+  private handleVoiceReplyToggle(
+    messageId: number,
+    payload: { text: string; session_id: string },
+    provenance: QueueProvenance,
+    enabled: boolean,
+  ): void {
+    if (!this.channelState) {
+      this.gatedReply(payload.session_id, provenance, messageId, 'Voice reply not available.');
+      this.queues.ack(messageId);
+      return;
+    }
+    this.channelState.setVoiceReply(payload.session_id, enabled);
+    const text = enabled
+      ? 'Voice replies enabled for this session.'
+      : 'Voice replies disabled for this session.';
+    this.gatedReply(payload.session_id, provenance, messageId, text);
     this.queues.ack(messageId);
   }
 
@@ -1694,6 +2092,7 @@ export class Orchestrator {
       return;
     }
 
+    const priorEvidence = this.promotion.listEvidence(knowledgeId);
     this.promotion.verifyByOwner(knowledgeId);
     this.audit.append({
       actor: ACTOR,
@@ -1705,7 +2104,11 @@ export class Orchestrator {
     const sendGate = evaluate({ actionId: 'message.send', provenance }, this.gateDeps);
     this.logGate('message.send', provenance, sendGate, { messageId });
     if (sendGate.verdict === 'allow') {
-      this.publishOutbound(payload.session_id, `Knowledge #${knowledgeId} verified.`);
+      const sources =
+        priorEvidence.length > 0
+          ? ` Sources: ${priorEvidence.map((e) => `${e.evidenceType}: ${e.summary.slice(0, 120)}`).join('; ')}.`
+          : '';
+      this.publishOutbound(payload.session_id, `Knowledge #${knowledgeId} verified.${sources}`);
     }
     this.queues.ack(messageId);
   }
@@ -1743,6 +2146,82 @@ export class Orchestrator {
         payload.session_id,
         `Curation done (snapshot #${result.snapshotId}): ${total} refuted.${proposalNote}`,
       );
+    }
+    this.queues.ack(messageId);
+  }
+
+  private async handleConsolidate(
+    messageId: number,
+    payload: { text: string; session_id: string },
+    provenance: QueueProvenance,
+  ): Promise<void> {
+    if (provenance !== 'owner' || !this.consolidation) {
+      this.queues.ack(messageId);
+      return;
+    }
+    if (!this.learning?.memory_consolidation_enabled) {
+      this.gatedReply(
+        payload.session_id,
+        provenance,
+        messageId,
+        'Memory consolidation is disabled (learning.memory_consolidation_enabled).',
+      );
+      this.queues.ack(messageId);
+      return;
+    }
+
+    const llmGate = evaluate({ actionId: 'llm.invoke', provenance }, this.gateDeps);
+    this.logGate('llm.invoke', provenance, llmGate, { messageId, mode: 'consolidate' });
+    if (llmGate.verdict !== 'allow') {
+      this.queues.ack(messageId);
+      return;
+    }
+    if (!this.checkLlmBudget(messageId, payload, provenance)) {
+      return;
+    }
+
+    try {
+      const result = await this.consolidation.run();
+      this.budget?.recordUsage(result.usage);
+      this.audit.append({
+        actor: 'consolidation',
+        action: 'consolidation.completed',
+        decision: 'info',
+        payload: { messageId, ...result },
+      });
+
+      const sendGate = evaluate({ actionId: 'message.send', provenance }, this.gateDeps);
+      this.logGate('message.send', provenance, sendGate, { messageId });
+      if (sendGate.verdict === 'allow') {
+        if (result.merged === 0) {
+          this.publishOutbound(
+            payload.session_id,
+            'Consolidation: not enough corroborated facts (need at least 2).',
+          );
+        } else {
+          this.publishOutbound(
+            payload.session_id,
+            `Consolidation done (snapshot #${result.snapshotId}): ${result.merged} merge(s), ${result.refuted} refuted, new ids: ${result.newKnowledgeIds.join(', ')}.`,
+          );
+        }
+      }
+    } catch (err) {
+      this.audit.append({
+        actor: 'consolidation',
+        action: 'consolidation.failed',
+        decision: 'info',
+        payload: {
+          messageId,
+          error: err instanceof Error ? err.message : String(err),
+        },
+      });
+      const sendGate = evaluate({ actionId: 'message.send', provenance }, this.gateDeps);
+      if (sendGate.verdict === 'allow') {
+        this.publishOutbound(
+          payload.session_id,
+          `Consolidation failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
     this.queues.ack(messageId);
   }
@@ -2327,6 +2806,7 @@ export class Orchestrator {
   async run(signal: AbortSignal): Promise<void> {
     while (!signal.aborted) {
       const hadMessage = await this.processOne();
+      this.onLoopTick?.();
       if (!hadMessage) await sleep(this.pollMs, signal);
     }
   }

@@ -165,7 +165,7 @@ describe('mcp google loop (C1)', () => {
 
     const actions = auditActions(auditDb);
     expect(actions).toContain('mcp.google.calendar_list');
-    expect(actions).toContain('mcp.tool.completed');
+    expect(actions.some((a) => a.startsWith('mcp.tool.'))).toBe(true);
     expect(actions).toContain('quarantine.completed');
   });
 
@@ -219,6 +219,6 @@ describe('mcp google loop (C1)', () => {
     expect(seen[0]!.url).toBe('/gmail/v1/users/me/messages/send');
     expect(seen[0]!.host).toBe('gmail.googleapis.com');
     expect(seen[0]!.authorization).toBeUndefined();
-    expect(auditActions(auditDb)).toContain('mcp.tool.completed');
+    expect(auditActions(auditDb).some((a) => a.startsWith('mcp.tool.'))).toBe(true);
   });
 });

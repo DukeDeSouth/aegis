@@ -25,6 +25,8 @@ credential; на v1.35 конфиг не проходит `--mode validate`).
 | `secret.yaml` | SDS-обёртка: generic secret из файла `/etc/broker/token.txt`           |
 | `token.txt`   | **Не в репозитории.** Сырой секрет; монтируется только брокеру         |
 
+**Remote broker (Sprint 39):** выделенный хост — см. [`../broker-remote/README.md`](../broker-remote/README.md).
+
 ## Как задать секрет
 
 1. Положите значение ключа (без перевода строки) в файл на хосте:

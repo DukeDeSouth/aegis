@@ -51,7 +51,7 @@ describe('v9 channel 2FA', () => {
 
     const orch = new Orchestrator(queues, audit, llm, pending, {
       secondFactor: { enabled: true, modes: ['cross_channel'], action_classes: ['irreversible'] },
-      pairedChannels: () => ({ telegram: true, discord: true }),
+      pairedChannels: () => ({ telegram: true, discord: true, webchat: false, matrix: false, slack: false }),
     });
 
     queues.publish(

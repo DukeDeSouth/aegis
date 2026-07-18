@@ -1,0 +1,18 @@
+# Standalone compose for the dedicated broker host (Sprint 39 S1).
+# Copy this directory to the broker VPS; secrets live only here.
+services:
+  broker:
+    image: envoyproxy/envoy:v1.37.1@sha256:29496a88fba9c4c9cdef4afe8fec70f536c5ba111b1c2bddbc5436b091ceca33
+    restart: unless-stopped
+    command: ['envoy', '-c', '/etc/broker/envoy.yaml']
+    ports:
+      - '8443:8443'
+    networks: [broker-egress]
+    volumes:
+      - ./envoy.yaml:/etc/broker/envoy.yaml:ro
+      - ./secret.yaml:/etc/broker/secret.yaml:ro
+      - ./secrets/token.txt:/etc/broker/token.txt:ro
+      - ./certs/server:/etc/broker/tls:ro
+
+networks:
+  broker-egress: {}

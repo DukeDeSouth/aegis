@@ -7,10 +7,11 @@
  * До Sprint 7 (Quarantine) untrusted-контент отклоняется fail-closed (DISCOVERY F1);
  * в S7 эта ветка — маршрут в очередь с provenance 'quarantine'.
  */
-import type { TgMessage, TgUpdate } from './telegram-client.ts';
+import type { TgMessage, TgUpdate, TgVoice } from './telegram-client.ts';
 
 export type Classified =
   | { kind: 'owner_text'; chatId: number; text: string }
+  | { kind: 'owner_voice'; chatId: number; voice: TgVoice }
   | { kind: 'pair_attempt'; chatId: number; fromId: number; code: string }
   | { kind: 'approve_attempt'; chatId: number; token: string; totpCode?: string }
   | { kind: 'untrusted'; chatId: number; reason: 'forwarded' | 'non_text' }
@@ -55,6 +56,7 @@ export function classifyUpdate(u: TgUpdate, ownerUserId: number | undefined): Cl
   if (ownerUserId === undefined || fromId !== ownerUserId) return { kind: 'stranger' };
 
   if (msg.forward_origin !== undefined) return { kind: 'untrusted', chatId, reason: 'forwarded' };
+  if (msg.voice !== undefined) return { kind: 'owner_voice', chatId, voice: msg.voice };
   if (typeof msg.text !== 'string' || msg.text.length === 0) {
     return { kind: 'untrusted', chatId, reason: 'non_text' };
   }

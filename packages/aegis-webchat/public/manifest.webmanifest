@@ -1,0 +1,17 @@
+{
+  "name": "AEGIS WebChat",
+  "short_name": "AEGIS",
+  "description": "Local AEGIS assistant channel",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f1115",
+  "theme_color": "#1a2030",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

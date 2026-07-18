@@ -14,6 +14,12 @@
 | [0008](0008-llm-provider-abstraction.md)          | LLM: OpenAI-совместимый протокол, тонкий клиент   | Accepted |
 | [0009](0009-post-mvp-core-loc-budget.md)          | Post-MVP LOC порог 5000 (Sprint 11–12)            | Accepted |
 | [0010](0010-oauth-refresh-sidecar.md)             | OAuth-refresh sidecar в trust-домене broker       | Accepted |
+| [0014](0014-sprint-29-webchat-loc.md)            | Sprint 29: WebChat adapter; LOC 8600               | Accepted |
+| [0015](0015-sprint-30-matrix-loc.md)            | Sprint 30: Matrix adapter; LOC 9000               | Accepted |
+| [0016](0016-sprint-31-slack-loc.md)            | Sprint 31: Slack adapter; LOC 9400               | Accepted |
+| [0025](0025-sprint-37-l1-consolidation-loc.md) | Sprint 37: L1 memory consolidation; LOC 10700    | Accepted |
+| [0026](0026-sprint-38-l2-research-deep-loc.md) | Sprint 38: L2 research-deep; LOC 11000           | Accepted |
+| [0017](0017-outbound-channel-routing.md)      | Hotfix: outbound release + unpaired skip          | Accepted |
 | [0013](0013-sprint-28-finance-loc.md)            | Sprint 28: C9 finance dispatch; LOC 8100          | Accepted |
 | [0012](0012-sprint-26-watch-imap-loc.md)          | Sprint 26: /watch + IMAP fetcher; LOC 7650        | Accepted |
 | [0011](0011-sprint-27-2fa-gate-loc.md)            | Sprint 27: 2FA human-gate; LOC 7920               | Accepted |

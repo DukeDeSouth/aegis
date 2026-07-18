@@ -82,6 +82,26 @@ describe('buildRunArgs — hardened-профиль ADR-0006', () => {
     expect(() => args(limits(), '/etc/passwd')).toThrow(/relative path/);
   });
 
+  it('runtime=gvisor добавляет --runtime runsc сразу после run', () => {
+    const a = buildRunArgs({
+      name: 't',
+      skillDir: '/skills/demo',
+      entrypoint: 'main.sh',
+      limits: limits(),
+      image: IMAGE,
+      internalNetwork: NET,
+      runtime: 'gvisor',
+    });
+    expect(a.slice(0, 4)).toEqual(['run', '--runtime', 'runsc', '--rm']);
+  });
+
+  it('runtime=docker (default) не добавляет --runtime', () => {
+    const a = args(limits());
+    expect(a[0]).toBe('run');
+    expect(a[1]).toBe('--rm');
+    expect(a).not.toContain('--runtime');
+  });
+
   it('передаёт -e env перед образом', () => {
     const a = buildRunArgs({
       name: 't',

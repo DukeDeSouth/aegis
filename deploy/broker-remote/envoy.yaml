@@ -1,0 +1,77 @@
+# Remote Credential Broker — mTLS listener :8443 (Sprint 39 S1).
+# Секреты только на этом хосте. Core подключается через broker-client + client cert.
+#
+# Validate:
+#   docker run --rm -v $PWD:/etc/broker:ro envoyproxy/envoy:v1.37.1 \
+#     envoy --mode validate -c /etc/broker/envoy.yaml
+
+node:
+  id: aegis-broker-remote
+  cluster: aegis
+
+static_resources:
+  listeners:
+    - name: broker_mtls
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 8443 }
+      filter_chains:
+        - transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              '@type': type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+              require_client_certificate: true
+              common_tls_context:
+                tls_certificates:
+                  - certificate_chain: { filename: /etc/broker/tls/server.crt }
+                    private_key: { filename: /etc/broker/tls/server.key }
+                validation_context:
+                  trusted_ca:
+                    filename: /etc/broker/tls/ca.crt
+          filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                '@type': type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: broker
+                route_config:
+                  name: allowlist
+                  virtual_hosts:
+                    - name: llm
+                      domains: ['api.openai.com', 'api.openai.com:*']
+                      routes:
+                        - match: { prefix: '/' }
+                          route:
+                            cluster: llm
+                            host_rewrite_literal: api.openai.com
+                http_filters:
+                  - name: envoy.filters.http.credential_injector
+                    typed_config:
+                      '@type': type.googleapis.com/envoy.extensions.filters.http.credential_injector.v3.CredentialInjector
+                      allow_request_without_credential: false
+                      credential:
+                        name: envoy.http.injected_credentials.generic
+                        typed_config:
+                          '@type': type.googleapis.com/envoy.extensions.http.injected_credentials.generic.v3.Generic
+                          header_value_prefix: 'Bearer '
+                          credential:
+                            name: broker_token
+                            sds_config:
+                              path_config_source:
+                                path: /etc/broker/secret.yaml
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      '@type': type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+  clusters:
+    - name: llm
+      type: STRICT_DNS
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          '@type': type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          sni: api.openai.com
+      load_assignment:
+        cluster_name: llm
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address: { address: api.openai.com, port_value: 443 }

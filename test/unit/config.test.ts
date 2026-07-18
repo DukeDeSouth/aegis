@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { configSchema } from '../../src/config/schema.ts';
 
 const validProfile = {
@@ -23,6 +24,18 @@ describe('configSchema (ADR-0008)', () => {
     const parsed = configSchema.parse(validConfig);
     expect(parsed.llm.q_llm.model).toBe('qwen3:14b');
     expect(parsed.telegram.poll_timeout_s).toBe(30); // default
+  });
+
+  it('принимает dual-vendor пример (S3): разные base_url и model у p_llm/q_llm', () => {
+    const raw = JSON.parse(
+      readFileSync(new URL('../../aegis.config.dual-vendor.example.json', import.meta.url), 'utf8'),
+    );
+    const parsed = configSchema.parse(raw);
+    expect(parsed.llm.p_llm.base_url).toContain('11434');
+    expect(parsed.llm.q_llm.base_url).toContain('openrouter');
+    expect(parsed.llm.p_llm.model).not.toBe(parsed.llm.q_llm.model);
+    expect(parsed.llm.p_llm.key_ref).toBe('AEGIS_P_LLM_KEY');
+    expect(parsed.llm.q_llm.key_ref).toBe('AEGIS_Q_LLM_KEY');
   });
 
   it('отклоняет секрет в конфиге: лишнее поле api_key не проходит .strict()', () => {
@@ -74,6 +87,11 @@ describe('configSchema (ADR-0008)', () => {
     const parsed = configSchema.parse(validConfig);
     expect(parsed.learning.self_improvement_llm_enabled).toBe(false);
     expect(parsed.learning.min_reuse_rate).toBe(0);
+    expect(parsed.learning.memory_consolidation_enabled).toBe(false);
+    expect(parsed.learning.consolidation_batch_size).toBe(25);
+    expect(parsed.learning.research_deep_enabled).toBe(false);
+    expect(parsed.learning.research_deep_branch_count).toBe(3);
+    expect(parsed.learning.research_deep_token_cap).toBe(12000);
   });
 
   it('memory.context: defaults (Sprint 11)', () => {
@@ -102,6 +120,31 @@ describe('configSchema (ADR-0008)', () => {
     ).toThrow();
     expect(() =>
       configSchema.parse({ ...validConfig, web: { search_url: 'not-a-url-{query}' } }),
+    ).toThrow();
+  });
+
+  it('webchat: loopback only', () => {
+    const parsed = configSchema.parse({
+      ...validConfig,
+      webchat: { enabled: true, host: '127.0.0.1', port: 8790, pairing_code_ref: 'AEGIS_WEBCHAT_PAIRING_CODE' },
+    });
+    expect(parsed.webchat?.port).toBe(8790);
+    expect(() =>
+      configSchema.parse({
+        ...validConfig,
+        webchat: { enabled: true, host: '0.0.0.0', port: 8790, pairing_code_ref: 'AEGIS_WEBCHAT_PAIRING_CODE' },
+      }),
+    ).toThrow();
+  });
+
+  it('sandbox.runtime: default docker, gvisor opt-in (Sprint 40)', () => {
+    expect(configSchema.parse(validConfig).sandbox).toBeUndefined();
+    expect(configSchema.parse({ ...validConfig, sandbox: {} }).sandbox?.runtime).toBe('docker');
+    expect(
+      configSchema.parse({ ...validConfig, sandbox: { runtime: 'gvisor' } }).sandbox?.runtime,
+    ).toBe('gvisor');
+    expect(() =>
+      configSchema.parse({ ...validConfig, sandbox: { runtime: 'firecracker' } }),
     ).toThrow();
   });
 });

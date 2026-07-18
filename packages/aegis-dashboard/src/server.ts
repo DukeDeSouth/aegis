@@ -4,7 +4,7 @@
 import { createServer as createHttpServer, type Server } from 'node:http';
 import type { DashboardConfig } from './config.ts';
 import { collectDashboardData } from './queries.ts';
-import { renderDashboard } from './render.ts';
+import { renderConnectorsPage, renderDashboard } from './render.ts';
 
 const SECURITY_HEADERS = {
   'Content-Type': 'text/html; charset=utf-8',
@@ -16,21 +16,33 @@ const SECURITY_HEADERS = {
 
 export function createDashboardServer(cfg: DashboardConfig): Server {
   return createHttpServer((req, res) => {
-    const path = req.url?.split('?')[0] ?? '/';
-    if (req.method !== 'GET' || path !== '/') {
-      res.writeHead(404, { 'Content-Type': 'text/plain' });
-      res.end('Not found');
-      return;
-    }
-    try {
-      const data = collectDashboardData(cfg);
-      res.writeHead(200, SECURITY_HEADERS);
-      res.end(renderDashboard(data));
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      res.writeHead(500, { 'Content-Type': 'text/plain' });
-      res.end(`dashboard error: ${msg}`);
-    }
+    void (async () => {
+      const path = req.url?.split('?')[0] ?? '/';
+      if (req.method !== 'GET') {
+        res.writeHead(405, { 'Content-Type': 'text/plain' });
+        res.end('Method not allowed');
+        return;
+      }
+      try {
+        const data = await collectDashboardData(cfg);
+        if (path === '/connectors') {
+          res.writeHead(200, SECURITY_HEADERS);
+          res.end(renderConnectorsPage(data));
+          return;
+        }
+        if (path !== '/') {
+          res.writeHead(404, { 'Content-Type': 'text/plain' });
+          res.end('Not found');
+          return;
+        }
+        res.writeHead(200, SECURITY_HEADERS);
+        res.end(renderDashboard(data));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end(`dashboard error: ${msg}`);
+      }
+    })();
   });
 }
 

@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#1a2030" />
+    <title>AEGIS WebChat</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>AEGIS WebChat</h1>
+        <p id="status">Загрузка…</p>
+      </header>
+      <section id="pair-panel" class="hidden">
+        <label for="pair-code">Код pairing из <code>aegis-setup init</code></label>
+        <div class="row">
+          <input id="pair-code" type="text" autocomplete="off" placeholder="aegis-…" />
+          <button id="pair-btn" type="button">Pair</button>
+        </div>
+      </section>
+      <section id="chat-panel" class="hidden">
+        <div id="messages" aria-live="polite"></div>
+        <div id="quick-actions" class="quick-actions" aria-label="Быстрые действия"></div>
+        <form id="send-form">
+          <input id="message-input" type="text" autocomplete="off" placeholder="Сообщение…" />
+          <button type="submit">Отправить</button>
+        </form>
+      </section>
+    </main>
+    <script src="/app.js" type="module"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js').catch(() => undefined);
+      }
+    </script>
+  </body>
+</html>

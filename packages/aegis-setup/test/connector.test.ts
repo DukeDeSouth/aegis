@@ -44,9 +44,28 @@ function makeRoot(name: string): string {
 }
 
 describe('connector presets', () => {
-  it('репо содержит пресеты волн 1 и 2', () => {
+  it('репо содержит все пресеты connectors/', () => {
     const names = listPresets(join(REPO_ROOT, 'connectors'));
-    expect(names).toEqual(['github', 'google', 'homeassistant', 'notes', 'rss', 'search', 'watch', 'weather']);
+    expect(names).toEqual([
+      'bookmarks',
+      'caldav',
+      'content-calendar',
+      'finance',
+      'github',
+      'google',
+      'homeassistant',
+      'inbox-triage',
+      'medialibrary',
+      'notes',
+      'notion',
+      'rss',
+      'search',
+      'shopping-list',
+      'social',
+      'travel',
+      'watch',
+      'weather',
+    ]);
   });
 
   it('add устанавливает skill и broker-маршруты; повторный add — no-op', () => {

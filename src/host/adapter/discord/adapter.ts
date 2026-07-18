@@ -89,6 +89,10 @@ export class DiscordAdapter implements ChannelAdapter {
 
   private async runSender(signal: AbortSignal): Promise<void> {
     while (!signal.aborted) {
+      if (this.state.getDiscordOwnerId() === undefined) {
+        await this.sleep(this.pollMs, signal);
+        continue;
+      }
       const had = await this.processOutbound();
       if (!had) await this.sleep(this.pollMs, signal);
     }
@@ -99,8 +103,12 @@ export class DiscordAdapter implements ChannelAdapter {
     if (!msg) return false;
     const payload = parseOutboundPayload(msg.payload);
     const channelId = payload ? sessionSuffix(payload.session_id, DISCORD_SESSION_PREFIX) : undefined;
-    if (!payload || channelId === undefined) {
+    if (!payload) {
       this.queues.markDead(msg.id);
+      return true;
+    }
+    if (channelId === undefined) {
+      this.queues.release(msg.id);
       return true;
     }
     try {

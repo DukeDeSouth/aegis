@@ -78,4 +78,17 @@ export class QueueStore {
   markDead(id: number): void {
     this.db.prepare('UPDATE messages SET dead = 1 WHERE id = ?').run(id);
   }
+
+  /** Вернуть сообщение в очередь — другой channel adapter заберёт (не наш session_id). */
+  release(id: number): void {
+    const now = this.now();
+    this.db
+      .prepare(
+        `UPDATE messages
+         SET visible_at = ?, claimed_by = NULL,
+             attempts = CASE WHEN attempts > 0 THEN attempts - 1 ELSE 0 END
+         WHERE id = ?`,
+      )
+      .run(now, id);
+  }
 }

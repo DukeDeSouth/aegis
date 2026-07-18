@@ -1,12 +1,14 @@
-# Заготовка systemd-юнита для native host (Sprint 10).
-# Запуск: node src/host/main.ts (Node >= 24, нативный type stripping).
+# Native host unit (Sprint 10 + Sprint 35 watchdog).
+# Run: node src/host/main.ts (Node >= 24).
 [Unit]
 Description=Aegis personal agent host
 After=network-online.target docker.service
 Wants=network-online.target
 
 [Service]
-Type=simple
+Type=notify
+WatchdogSec=60
+NotifyAccess=main
 User=aegis
 Group=aegis
 WorkingDirectory=/opt/aegis

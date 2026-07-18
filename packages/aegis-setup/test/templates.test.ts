@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { generateConfig, generatePairingCode } from '../src/templates.ts';
+import { generateConfig, generateDockerCompose, generatePairingCode } from '../src/templates.ts';
 import { parseEnvFile } from '../src/checks.ts';
 import { buildPlans } from '../src/init.ts';
 
@@ -20,6 +20,26 @@ describe('templates', () => {
     expect(json).toContain('"key_ref": "AEGIS_P_LLM_KEY"');
     expect(json).not.toContain('bot_token":');
   });
+
+  it('remote mode points web.broker_host at broker-client', () => {
+    const json = generateConfig({
+      dataDir: './data',
+      llmBaseUrl: 'u',
+      llmModel: 'm',
+      qLlmBaseUrl: 'u',
+      qLlmModel: 'm',
+      pairingCode: 'aegis-abc',
+      brokerMode: 'remote',
+      brokerRemoteHost: '10.0.0.5',
+    });
+    expect(json).toContain('"broker_host": "aegis-broker-client:8080"');
+  });
+
+  it('remote compose has broker-client only', () => {
+    const yaml = generateDockerCompose('remote');
+    expect(yaml).toContain('broker-client');
+    expect(yaml).not.toContain('\n  broker:\n');
+  });
 });
 
 describe('buildPlans', () => {
@@ -33,6 +53,21 @@ describe('buildPlans', () => {
       pairingCode: 'aegis-abc',
     }, 'secret-key');
     expect(plans.some((p) => p.path.endsWith('token.txt') && p.mode === 0o600)).toBe(true);
+  });
+
+  it('remote mode writes token under broker-remote secrets', () => {
+    const plans = buildPlans('/tmp/a', {
+      dataDir: './data',
+      llmBaseUrl: 'u',
+      llmModel: 'm',
+      qLlmBaseUrl: 'u',
+      qLlmModel: 'm',
+      pairingCode: 'aegis-abc',
+      brokerMode: 'remote',
+      brokerRemoteHost: '10.0.0.2',
+    }, 'remote-secret');
+    expect(plans.some((p) => p.path.includes('broker-remote/secrets/token.txt'))).toBe(true);
+    expect(plans.some((p) => p.path.endsWith('broker/token.txt'))).toBe(false);
   });
 });
 

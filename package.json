@@ -24,6 +24,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:security": "vitest run --config vitest.security.config.ts",
+    "test:live": "vitest run --config vitest.live.config.ts",
+    "test:live:watch": "vitest --config vitest.live.config.ts",
     "loc": "node scripts/loc.mjs"
   },
   "dependencies": {

@@ -5,7 +5,13 @@
 import type Database from 'better-sqlite3';
 import type { EpistemicStatus, EvidenceType } from './types.ts';
 
-export const PROMOTION_GATES = ['auto_corroborate', 'owner_verify', 'refutation', 'decay'] as const;
+export const PROMOTION_GATES = [
+  'auto_corroborate',
+  'owner_verify',
+  'refutation',
+  'decay',
+  'llm_consolidate',
+] as const;
 export type PromotionGateType = (typeof PROMOTION_GATES)[number];
 
 const MAX_EVIDENCE_PER_KNOWLEDGE = 20;
@@ -98,5 +104,18 @@ export class PromotionGate {
   refute(knowledgeId: number, gate: PromotionGateType, reason: string): void {
     const evidenceId = this.addEvidence(knowledgeId, 'external_source', reason);
     this.promote(knowledgeId, 'refuted', gate, evidenceId);
+  }
+
+  listEvidence(
+    knowledgeId: number,
+    limit = 3,
+  ): { evidenceType: EvidenceType; summary: string }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT evidence_type, summary FROM evidence
+         WHERE knowledge_id = ? ORDER BY id DESC LIMIT ?`,
+      )
+      .all(knowledgeId, limit) as { evidence_type: EvidenceType; summary: string }[];
+    return rows.map((r) => ({ evidenceType: r.evidence_type, summary: r.summary }));
   }
 }

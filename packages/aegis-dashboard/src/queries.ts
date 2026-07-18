@@ -47,8 +47,16 @@ export interface SkillRow {
   lastUsedAt: number | null;
 }
 
+export interface HostHealthStatus {
+  ok: boolean;
+  loopAlive: boolean;
+  lastTickAt: number | null;
+  probeError: string | null;
+}
+
 export interface DashboardData {
   generatedAt: number;
+  hostHealth: HostHealthStatus;
   auditChainOk: boolean;
   auditEntries: number;
   auditBrokenAtId?: number;
@@ -60,6 +68,8 @@ export interface DashboardData {
   reuse: { injectable: number; used: number; reuseRate: number | null };
   skillReuse: { tracked: number; used: number; reuseRate: number | null };
   skills: SkillRow[];
+  mcpServers: import('./config.ts').McpServerSummary[];
+  connectorStats: import('./config.ts').ConnectorAuditStat[];
   lastCuration: { snapshotId: number; reason: string; createdAt: number } | null;
   lastCurationAudit: AuditRow | null;
 }
@@ -309,7 +319,80 @@ function lastCurationAudit(db: Database.Database): AuditRow | null {
   return row ?? null;
 }
 
-export function collectDashboardData(cfg: DashboardConfig, now = Date.now()): DashboardData {
+function mcpConnectorStats(db: Database.Database): ConnectorAuditStat[] {
+  const rows = db
+    .prepare(`SELECT ts, action FROM audit_log WHERE action LIKE 'mcp.tool.%'`)
+    .all() as { ts: number; action: string }[];
+  const byServer = new Map<string, { lastCallAt: number; callCount: number }>();
+  for (const row of rows) {
+    const server = row.action.slice('mcp.tool.'.length);
+    if (!server) continue;
+    const cur = byServer.get(server) ?? { lastCallAt: 0, callCount: 0 };
+    cur.callCount += 1;
+    if (row.ts >= cur.lastCallAt) cur.lastCallAt = row.ts;
+    byServer.set(server, cur);
+  }
+  return [...byServer.entries()]
+    .map(([server, s]) => ({
+      server,
+      lastCallAt: s.lastCallAt > 0 ? s.lastCallAt : null,
+      lastTool: null,
+      callCount: s.callCount,
+    }))
+    .sort((a, b) => a.server.localeCompare(b.server));
+}
+
+function connectorStatsFromConfig(
+  servers: import('./config.ts').McpServerSummary[],
+  stats: ConnectorAuditStat[],
+): ConnectorAuditStat[] {
+  const byName = new Map(stats.map((s) => [s.server, s]));
+  return servers.map((s) => {
+    const hit = byName.get(s.name);
+    return (
+      hit ?? {
+        server: s.name,
+        lastCallAt: null,
+        lastTool: null,
+        callCount: 0,
+      }
+    );
+  });
+}
+
+export async function probeHostHealth(url: string, timeoutMs = 2000): Promise<HostHealthStatus> {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { signal: ac.signal });
+    const body = (await res.json()) as {
+      ok?: boolean;
+      loop_alive?: boolean;
+      last_tick_at?: number | null;
+    };
+    const loopAlive = body.loop_alive === true;
+    return {
+      ok: res.ok && loopAlive,
+      loopAlive,
+      lastTickAt: body.last_tick_at ?? null,
+      probeError: null,
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      loopAlive: false,
+      lastTickAt: null,
+      probeError: e instanceof Error ? e.message : 'probe failed',
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function collectDashboardData(
+  cfg: DashboardConfig,
+  now = Date.now(),
+): Promise<DashboardData> {
   const paths = dbPaths(cfg);
   const queueDb = openRoDb(paths.queue);
   const auditDb = openRoDb(paths.audit);
@@ -321,9 +404,12 @@ export function collectDashboardData(cfg: DashboardConfig, now = Date.now()): Da
   }
 
   const chain = verifyAuditChain(auditDb);
+  const mcpStats = mcpConnectorStats(auditDb);
+  const hostHealth = await probeHostHealth(cfg.healthUrl);
 
   return {
     generatedAt: now,
+    hostHealth,
     auditChainOk: chain.ok,
     auditEntries: chain.entries,
     ...(chain.brokenAtId !== undefined ? { auditBrokenAtId: chain.brokenAtId } : {}),
@@ -337,6 +423,8 @@ export function collectDashboardData(cfg: DashboardConfig, now = Date.now()): Da
       ? readSkillReuse(memoryDb)
       : { tracked: 0, used: 0, reuseRate: null },
     skills: listSkills(cfg.skillsDir, memoryDb),
+    mcpServers: cfg.mcpServers,
+    connectorStats: connectorStatsFromConfig(cfg.mcpServers, mcpStats),
     lastCuration: memoryDb ? lastSnapshot(memoryDb) : null,
     lastCurationAudit: lastCurationAudit(auditDb),
   };

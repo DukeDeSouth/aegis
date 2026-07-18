@@ -13,7 +13,7 @@
 Каждая запись несёт метаданные:
 
 - `epistemic_status` ∈ `{unverified, corroborated, verified, refuted}`
-- `provenance` — кто и в каком домене породил: `owner` / `orchestrator` / `quarantine` / `background`
+- `provenance` — кто и в каком домене породил: `owner` / `orchestrator` / `quarantine` / `background` / `consolidation`
 - `evidence[]` — ссылки на то, что подтвердило запись (успешный тест, воспроизведённое наблюдение, подтверждение владельца)
 
 ## Жизненный цикл знания
@@ -50,7 +50,7 @@ promotion-гейт:
 Двухфазная, с инверсией дефолтов Hermes:
 
 - **Детерминированная фаза (всегда, бесплатно):** staleness (устаревание), usage-счётчики, дедупликация, decay. Работает без LLM.
-- **LLM-консолидация (только по бюджету):** обобщение/переписывание — опционально, списывается с дневного бюджета.
+- **LLM-консолидация (только по бюджету):** обобщение/переписывание — опционально, списывается с дневного бюджета. Команда `/consolidate` (владелец); `learning.memory_consolidation_enabled` default `false`. Q-LLM предлагает merge-план (JSON); детерминированный `ConsolidationRunner` refute-ит источники и вставляет `unverified` с provenance `consolidation` + evidence `llm_proposal`. Snapshot перед мутацией.
 
 Перед любой мутацией хранилища — **snapshot/rollback** (наследуется у Hermes Curator), чтобы плохую консолидацию можно было откатить.
 

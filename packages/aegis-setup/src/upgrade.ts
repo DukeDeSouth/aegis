@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { generateConfig, generateDockerCompose, generateHostEnv, SETUP_VERSION, type SetupInput } from './templates.ts';
-import { readText, resolveInstallPaths, writePlans } from './fs.ts';
+import { readManifest, readText, resolveInstallPaths, writePlans } from './fs.ts';
 import { createPrompter } from './prompt.ts';
 
 function jsonKeys(obj: unknown, prefix = ''): string[] {
@@ -59,7 +59,9 @@ export async function runUpgrade(opts: UpgradeOptions): Promise<number> {
   }
 
   const newConfig = generateConfig(existing);
-  const newCompose = generateDockerCompose();
+  const manifest = readManifest(opts.root);
+  const brokerMode = manifest.broker_mode ?? 'local';
+  const newCompose = generateDockerCompose(brokerMode);
   const oldConfig = readText(paths.config) ?? '';
   const oldCompose = readText(paths.compose) ?? '';
 

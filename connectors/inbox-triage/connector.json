@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "name": "inbox-triage",
+  "description": "Scheduled inbox triage via Google C1 composition (C15)",
+  "skill": true,
+  "broker_routes": [],
+  "config_hints": [
+    "requires google connector (C1) with OAuth sidecar running",
+    "morning triage cron: { \"id\": \"inbox-morning\", \"cron\": \"08:00\", \"text\": \"Inbox triage: use /mcp google gmail_search for unread last 24h; categorize urgent/action/fyi; write summary to workspace/inbox/today.md; create gmail_draft replies for urgent items only — never gmail_send\", \"session_id\": \"webchat:local\" }",
+    "evening digest cron: { \"id\": \"inbox-evening\", \"cron\": \"18:00\", \"text\": \"Summarize inbox actions completed today from workspace/inbox/today.md\", \"session_id\": \"webchat:local\" }"
+  ]
+}

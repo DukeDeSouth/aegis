@@ -438,37 +438,285 @@
 
 ---
 
-## Sprint 29 — Matrix-канал (C12) + go/no-go C10/C11
+## Sprint 29 — WebChat: локальный канал нулевой настройки
 
-**Цель:** третий paired control-канал владельца (privacy-ЦА) и формальное решение по отложенным C10/C11.
+**Цель:** диалог с агентом сразу после `aegis-setup init` — без создания бота в Telegram/Discord. Первый спринт волны каналов: без control-канала коннекторы не дают полноценного продукта.
 
-**Спека:** [`CONNECTORS.md`](CONNECTORS.md) §C12, §C10–C11 | [`POST_MVP_FEATURES.md`](POST_MVP_FEATURES.md) §F10 (продолжение)
+**Спека:** [`CONNECTORS.md`](CONNECTORS.md) §C12 (примыкает) | [`POST_MVP_FEATURES.md`](POST_MVP_FEATURES.md) §F10/F11 | **M7:** [`m7-cycles/sprint-29-webchat-локальный-канал-нулевой-настройк/`](../m7-cycles/sprint-29-webchat-локальный-канал-нулевой-настройк/)
 
-**Критерий старта C10/C11 в этом спринте:** только если до начала кодинга выполнены метрики Sprint 28 (см. ниже); иначе — Matrix only, C10/C11 → Sprint 30+.
+- [x] ADR-0014: архитектура WebChat — тонкий `WebChatAdapter` в ядре (localhost-only HTTP + long-poll/SSE) vs отдельный доверенный процесс с прямой записью в очередь; решение по LOC-порогу. Ориентир — тонкий adapter в ядре: канал = граница авторизации, второй доверенный writer очереди размывает trust-домены (M)
+- [x] `WebChatAdapter` на `ChannelAdapter`: bind строго `127.0.0.1`, pairing write-once кодом из консоли (аналог `/pair`), `session_id` префикс `webchat:`, provenance `owner` только после pairing (L)
+- [x] UI-статика вне ядра: `packages/aegis-webchat/` — HTML+JS без сборки (паттерн dashboard), история диалога, кнопка `/approve` для pending; XSS-escape; **не** смешивать с read-only dashboard (M)
+- [x] Безопасность: unpaired POST → deny; session token на запросы записи; никаких секретов в ответах; V1-контур не ослаблен (M)
+- [x] Интеграция с Sprint 27: расширить `gate/channels.ts` — `webchat` как `ChannelKind` для 2FA (S)
+- [x] `aegis-setup init`: WebChat включён по умолчанию, печатает URL + pairing-код (S)
+- [x] Docs: раздел «Каналы общения» в README + CONNECTORS.md — «канал vs коннектор», текущий список каналов (S)
+- [x] Тесты: unit adapter + integration loop; негатив «unpaired → deny», «bind не 0.0.0.0» (M)
 
-- [ ] ADR-0014: LOC-порог под `MatrixAdapter` (если ядро растёт) (S)
-- [ ] `MatrixAdapter` на `ChannelAdapter`: Client-Server API (`/sync` long-poll), DM-only в v1 (M)
-- [ ] Pairing write-once (как Discord/Telegram); `session_id` префикс `matrix:` в очереди (M)
-- [ ] Интеграция с Sprint 27: `gate.second_factor` cross-channel TG/Discord ↔ Matrix (S)
-- [ ] Credential homeserver + access token **только у broker** или env ref в trust-домене хоста — не в sandbox (M)
-- [ ] `aegis-setup`: hints для Matrix (homeserver URL, pairing) (S)
-- [ ] Go/no-go **C10 n8n**: ≥3 активных коннектора на эталонной установке + user-story → зафиксировать в CONNECTORS.md (S)
-- [ ] Go/no-go **C11 Playwright**: gap в research/watch (audit/dashboard) → зафиксировать в CONNECTORS.md (S)
-- [ ] Тесты: unit adapter + integration loop; V1 injection в room event (M)
+**DoD:** свежая установка → `init` → открыл localhost-URL → paired диалог за ≤2 минуты без внешних ботов; unpaired отклонён; bind вне loopback — fail-closed; V1 зелёный; dashboard (F11) остаётся read-only.
 
-**DoD:** paired Matrix DM → диалог с агентом; unpaired → deny; irreversible + 2FA on → approve из другого канала; setup документирован ≤10 мин; решение C10/C11 записано (go с ADR или defer Sprint 30+).
+**Post-29 hotfix (2026-07-16):** ADR-0017 + M7 [`hotfix-webchat-outbound-delivery-и-sessия/`](../m7-cycles/hotfix-webchat-outbound-delivery-и-sessия/) — shared outbound queue: `release()` для чужих `session_id`, unpaired adapters skip outbound, WebChat `{paired,authed}` + reauth.
+
+**Post-29 UX (2026-07-16):** M7 [`webchat-ux-история-доставка-сессия/`](../m7-cycles/webchat-ux-история-доставка-сессия/) — `GET /api/history`, hydrate UI при F5, `visibilitychange` poll recovery.
+
+**Post-29 outbox (2026-07-16):** ADR-0018 + M7 [`webchat-outbox-stale-waiter-и-гарантии-доставки/`](../m7-cycles/webchat-outbox-stale-waiter-и-гарантии-доставки/) — stale waiter после poll timeout терял ответы; fix `removeWaiter` + UI tail-sync из episodes.
+
+**Post-29 locale (2026-07-16):** ~~ADR-0019~~ **removed** — selector/API/inject сняты; язык в тексте сообщения.
+
+**Post-29 debt (2026-07-16):** M7 [`webchat-post29-техдолг-dedupe-доставка/`](../m7-cycles/webchat-post29-техдолг-dedupe-доставка/) — dual-key dedupe (`dedupe.js`); poll + tail-sync + local send без дублей в DOM.
+
+---
+
+## Sprint 30 — Matrix-канал (C12) + go/no-go C10/C11
+
+**Цель:** privacy control-канал + формальное решение по отложенным C10/C11.
+
+**Спека:** [`CONNECTORS.md`](CONNECTORS.md) §C12, §C10–C11 | [`POST_MVP_FEATURES.md`](POST_MVP_FEATURES.md) §F10 (продолжение) | **M7:** [`m7-cycles/sprint-30-matrix-канал-c12-matrixadapter-на-channe/`](../m7-cycles/sprint-30-matrix-канал-c12-matrixadapter-на-channe/)
+
+**Критерий старта C10/C11:** только decision + ADR в этом спринте; код n8n/Playwright → Sprint 31+ при go.
+
+- [x] ADR-0015: LOC-порог под `MatrixAdapter` (если ядро растёт) (S)
+- [x] `MatrixAdapter` на `ChannelAdapter`: Client-Server API (`/sync` long-poll), DM-only в v1 (M)
+- [x] Pairing write-once; `session_id` префикс `matrix:`; `ChannelKind` + 2FA cross-channel (M)
+- [x] Credential homeserver + access token в trust-домене хоста — не в sandbox (M)
+- [x] `aegis-setup`: hints для Matrix (homeserver URL, pairing) (S)
+- [x] Go/no-go **C10 n8n** и **C11 Playwright** → CONNECTORS.md (S)
+- [x] Docs: WhatsApp/iMessage — обновить «Чего сознательно не делаем» (Meta 2026-01, Baileys/imsg); Matrix-бриджи на стороне владельца (S)
+- [x] Тесты: unit adapter + integration; V1 injection в room event (M)
+
+**DoD:** paired Matrix DM → диалог; unpaired → deny; 2FA cross-channel с WebChat/TG/Discord; C10/C11 decision записана.
+
+---
+
+## Sprint 31 — Slack-канал (C12, продолжение)
+
+**Цель:** канал для аудитории «агент рядом с работой» — официальный API, дешёвый на отработанном паттерне Discord.
+
+**Спека:** [`CONNECTORS.md`](CONNECTORS.md) §C12
+
+- [x] ADR-0016: LOC-порог под `SlackAdapter` (если ядро растёт) (S)
+- [x] `SlackAdapter` на `ChannelAdapter`: Socket Mode (без публичного endpoint — идеально для self-hosted), DM-only в v1; bot token + app-level token в trust-домене хоста, не в sandbox (L)
+- [x] Pairing write-once, `session_id` префикс `slack:`, deny-by-default (M)
+- [x] Интеграция с `gate.second_factor`: Slack как второй канал (S)
+- [x] `aegis-setup`: hints для Slack (создание app, Socket Mode, токены) (S)
+- [x] Signal: зафиксировать позицию в CONNECTORS.md — `signal-cli` = неофициальный клиент, противоречит правилу «только официальные API»; остаётся в бэклоге до официального bot-API либо покрывается Matrix-бриджем на стороне владельца (S)
+- [x] Тесты: unit adapter + integration loop; V1 injection в DM; unpaired deny (M)
+
+**DoD:** paired Slack DM → диалог с агентом; unpaired → deny; setup документирован ≤10 мин; позиция по Signal записана; V1/V9 зелёные.
+
+---
+
+## Sprint 32 — Соцсети: C13 social publishing + C15 inbox-триаж
+
+**Цель:** закрыть сценарий №1 рынка (по анализу OpenClaw/Hermes) на готовых рельсах: broker + gate + пресеты, без роста ядра.
+
+**Спека:** [`BACKLOG.md`](BACKLOG.md) §1 (C13, C15) | [`CONNECTORS.md`](CONNECTORS.md) (каталог расширить C13–C16) | **M7:** [`m7-cycles/sprint-32-соцсети-c13-social-publishing-c15-inbox-триаж/`](../m7-cycles/sprint-32-соцсети-c13-social-publishing-c15-inbox-триаж/) (`cycle_sprint-32-social-c13-c15_935201`)
+
+- [x] Discovery-решение C13: **self-hosted Postiz** (официальные OAuth-флоу платформ, токены в Postiz-инстансе владельца = отдельный trust-домен; минусы — стек Postgres+Redis+Temporal, AGPL как отдельный сервис) vs **прямой X API** через broker (дешевле, одна платформа). Зафиксировать в CONNECTORS.md §C13 (M)
+- [x] Пресет `connectors/social`: маршрут broker → Postiz API (`aegis → postiz`, не `aegis → соцсети`; собственный egress Postiz честно описан в connector.json), API-ключ в секрет-файле broker (M)
+- [x] Классы: аналитика/тренды — read-only; драфт/расписание — reversible; publish/DM — irreversible → `/approve`; автономный аутрич — **не маппится** (граница позиционирования) (S)
+- [x] Сценарий «очередь постов на утренний аппрув»: cron-hint → драфты → pending → `/approve` из любого канала (2FA применимо) (M)
+- [x] C15: inbox-триаж по расписанию — cron-композиция поверх C1 (категоризация, «важное за день», драфты ответов на ревью); без кода ядра (S)
+- [x] Тесты: V1 injection в ответе Postiz/почты не инициирует publish; V2 нет токенов вне broker/Postiz; irreversible без `/approve` → pending (M)
+
+**DoD:** «напиши пост про X и поставь в очередь» → драфт → `/approve` → опубликовано через Postiz; утренний триаж почты приходит по cron; ни одного нового gate-класса; V1/V2 зелёные.
+
+---
+
+## Sprint 33 — Контент-петля: C14 медиа-пайплайн + U1 голос-вход
+
+**Цель:** второй по громкости сценарий конкурентов — медиа и голос, целиком в sandbox.
+
+**Спека:** [`BACKLOG.md`](BACKLOG.md) §1 (C14), §3 (U1) | **M7:** [`m7-cycles/sprint-33-контент-петля-c14-медиа-u1-голос/`](../m7-cycles/sprint-33-контент-петля-c14-медиа-u1-голос/) (`cycle_sprint-33-media-voice-c14-u1_948301`)
+
+- [x] C14: ffmpeg-скилл в sandbox по паттерну `watch.sh` — «N версий клипа: YouTube / 9:16 TikTok / ≤60s Shorts», нарезка по таймкодам; файлы в `workspace/`, сеть не нужна (M)
+- [x] C14: субтитры — whisper.cpp в sandbox-образе (pinned), выход `.srt` рядом с видео (M)
+- [x] U1: голосовые сообщения из Telegram → скачивание → STT (whisper.cpp) в sandbox → транскрипт через карантин → P (M); Matrix voice — отложено
+- [x] Sandbox-образ: `deploy/sandbox/Dockerfile.media` (ffmpeg + whisper), `AEGIS_MEDIA_SANDBOX_IMAGE`, без сети (M)
+- [x] C16: контент-календарь — еженедельная cron-композиция (аналитика C13 + `/research` тренды → драфт плана в `workspace/`) (S)
+- [x] Тесты: `media-transcode.test.ts`, `voice-telegram.test.ts`, `v3-media-no-network.test.ts`, `policy.test.ts` (owner_voice) (M)
+
+**DoD:** «сделай из этого клипа версии для YouTube/TikTok/Shorts» работает из чата; voice-заметка возвращается транскриптом и ответом; V1/V3 зелёные; ядро не выросло.
+
+---
+
+## Sprint 34 — Self-hosted быт: C17 медиатека + C18 закладки + U3 PWA + U4 дашборд коннекторов
+
+**Цель:** добить бытовые сценарии self-hosted ЦА и наблюдаемость парка коннекторов.
+
+**Спека:** [`BACKLOG.md`](BACKLOG.md) §2 (C17, C18), §3 (U3, U4)
+
+- [x] C17: пресет Jellyfin/Radarr/Sonarr (локальные API, паттерн Home Assistant): статус/поиск — read-only, «поставь в очередь» — reversible, удаление — irreversible (M)
+- [x] C18: пресет Karakeep/linkding — «сохрани ссылку» (reversible), еженедельный дайджест несмотренного (композиция с C6) (S)
+- [x] U3: WebChat как PWA — manifest + иконка + offline-заглушка; bind остаётся loopback/LAN-политика без изменений (S)
+- [x] U4: дашборд — страница коннекторов (установлено, последний вызов, ошибки из audit) — read-only, паттерн F11 (S)
+- [x] C19: покупки/меню — композиция workspace-списки + `/watch` цены + драфт заказа; SKILL.md-пресет (S)
+- [x] Тесты: V1/V2-паттерн на C17/C18; dashboard остаётся GET-only (S)
+
+**DoD:** «что качается?» / «сохрани и напомни в воскресенье» работают; агент на домашнем экране телефона; страница коннекторов показывает живой парк; V-контур зелёный.
+
+---
+
+## Sprint 35 — Зрелость: L3 автокомпозиции + S4 backup + S5 healthcheck
+
+**Цель:** «агент сам предложил автоматизацию» + операционная зрелость установки.
+
+**Спека:** [`BACKLOG.md`](BACKLOG.md) §4 (L3), §5 (S4, S5) | **M7:** [`m7-cycles/sprint-35-зрелость-l3-автокомпозиции-repeat-detect/`](../m7-cycles/sprint-35-зрелость-l3-автокомпозиции-repeat-detect/) (`cycle_sprint-35-l3-repeat-_309077`)
+
+- [x] L3: repeat-detector (F5) расширить на цепочки команд → драфт композитного навыка → существующий путь `/skill-review|accept` (ADR при росте ядра) (M)
+- [x] S4: `aegis-setup backup|restore` — экспорт/импорт queue.db, memory.db, workspace, skills одной командой (механика `VACUUM INTO` уже есть) (S)
+- [x] S5: `/health` у ядра (минимальный рост) + systemd watchdog + строка статуса в дашборде (S)
+- [x] Тесты: draft-композиция не в prompt до accept (V4-паттерн); backup→restore round-trip; health отражает падение петли (M)
+
+**DoD:** после 3 повторов цепочки агент предлагает композитный навык; `backup` восстанавливается на чистой машине; тихая смерть процесса видна в дашборде и systemd; V4 зелёный.
+
+---
+
+## Sprint 36 — Вариант A: U2 TTS + C20 travel + S3 мульти-модель
+
+**Статус:** **закрыт** — U2 + C20 + S3 (вариант A).
+
+**Спека:** [`BACKLOG.md`](BACKLOG.md) §3 (U2), §2 (C20), §5 (S3) | **M7 (U2):** [`m7-cycles/sprint-36-вариант-a-u2-tts-ответы/`](../m7-cycles/sprint-36-вариант-a-u2-tts-ответы/) (`cycle_sprint-36-u2-tts-_847201`)
+
+### Задача 1 — U2 TTS (текущая)
+
+- [x] Piper в `Dockerfile.media` + `voice-synthesize.sh` (media-sandbox, без сети)
+- [x] `SandboxVoiceSynthesizer` + расширение outbound (`voice_rel_path`)
+- [x] `TelegramClient.sendVoice` + adapter branch
+- [x] `/voice-reply on|off` per-session; триггер «ответь голосом»
+- [x] Тесты: synthesize mock, telegram outbound voice, V3 no-network
+
+**DoD U2:** «ответь голосом» → voice-сообщение в Telegram; V3 зелёный; ядро ≤80 LOC.
+
+### Задача 2 — C20 travel
+
+- [x] Пресет `connectors/travel` — aviationstack + парсер почты C1; cron-hint
+
+### Задача 3 — S3 мульти-модель
+
+- [x] Пример конфига `p_llm` / `q_llm` разных вендоров (схема уже есть ADR-0008)
+- [x] V1 e2e с двумя провайдерами + DEPLOYMENT.md
+
+**DoD спринта:** U2 + C20 + S3; LOC в пределах 10100 или ADR supplement.
+
+---
+
+## Sprint 37 — L1 LLM-консолидация памяти
+
+**Статус:** **закрыт** (2026-07-17).
+
+**Спека:** [`BACKLOG.md`](BACKLOG.md) §4 (L1) | **M7:** [`m7-cycles/sprint-37-l1-llm-консолидация-памяти-периодический/`](../m7-cycles/sprint-37-l1-llm-консолидация-памяти-периодический/) (`cycle_sprint-37-l1-llm--q-_317568`)
+
+### Задача — L1 консолидация
+
+- [x] `ConsolidationRunner` + Q-LLM JSON protocol + `PromotionGate` apply
+- [x] `/consolidate` + `learning.memory_consolidation_enabled` (default false)
+- [x] Миграция provenance `consolidation`; gate `llm_consolidate`
+- [x] ADR-0025 LOC 10400→10700
+- [x] Тесты: unit parser, `consolidation-loop`, V4 extension
+
+**DoD L1:** после прогона дубли слиты с evidence-цепочкой; `/verify` показывает источники; V4 зелёный.
+
+---
+
+## Sprint 38 — L2 суб-агенты параллельного ресёрча
+
+**Статус:** **закрыт** (2026-07-17).
+
+**Спека:** [`BACKLOG.md`](BACKLOG.md) §4 (L2) | **M7:** [`m7-cycles/sprint-38-l2-суб-агенты-параллельного-ресёрча-rese/`](../m7-cycles/sprint-38-l2-суб-агенты-параллельного-ресёрча-rese/) (`cycle_sprint-38-l2---resea_808090`)
+
+### Задача — L2 research-deep
+
+- [x] `ResearchDeepRunner` — Q decompose + parallel fetch/Q + P synthesis
+- [x] `/research-deep` + `learning.research_deep_enabled` (default false)
+- [x] ADR-0026 LOC 10700→11000
+- [x] Тесты: unit parser, `research-deep-loop`, V1 extension
+
+**DoD L2:** `/research-deep` даёт сводку из ≥3 веток; бюджет-стоп работает; V1 зелёный; ветки без tools.
+
+---
+
+## Sprint 39 — S1 удалённый credential broker
+
+**Статус:** **закрыт** (2026-07-17).
+
+**Спека:** [`BACKLOG.md`](BACKLOG.md) §5 (S1) | **M7:** [`m7-cycles/sprint-39-s1-remote-credential-broker-deploybroker/`](../m7-cycles/sprint-39-s1-remote-credential-broker-deploybroker/) (`cycle_sprint-39-s1-remote-_696203`)
+
+### Задача — S1 remote broker
+
+- [x] `deploy/broker-remote/` — compose + Envoy mTLS :8443 на выделенном хосте
+- [x] `deploy/broker-client/` — forwarder на core-хосте (plain :8080 → remote mTLS)
+- [x] `aegis-setup init --broker-mode remote --broker-host` + генерация CA/server/client certs
+- [x] `aegis-setup verify` — smoke через broker-client (404 unknown Host)
+- [x] Compose profile `remote-broker` для broker-client; local broker без изменений
+- [x] `test/security/v2-remote-broker.test.ts` — core не читает secret files
+- [x] `docs/DEPLOYMENT.md`, `THREAT_MODEL.md`, ADR-0027
+
+**DoD S1:** remote init + verify; v2-remote зелёный; **LOC ядра +0**.
+
+---
+
+## Sprint 40 — S2 gVisor sandbox runtime
+
+**Статус:** **закрыт** 2026-07-17.
+
+**Спека:** [`BACKLOG.md`](BACKLOG.md) §5 (S2) | **M7:** [`m7-cycles/sprint-40-s2-gvisor-runsc-sandbox-runtime-adr-0006/`](../m7-cycles/sprint-40-s2-gvisor-runsc-sandbox-runtime-adr-0006/) (`cycle_sprint-40-s2-gvisor-_785838`)
+
+### Задача — S2 gVisor (ADR-0006 upgrade-path)
+
+- [x] `sandbox.runtime: docker | gvisor` в config (default docker)
+- [x] `DockerSandboxRunner` — `--runtime runsc` при gvisor
+- [x] `deploy/gvisor/` — README, daemon.json.example, установка runsc
+- [x] `aegis-setup verify` — smoke runsc при runtime=gvisor
+- [x] `test/security/v3-gvisor-runtime.test.ts` — V3 subset под runsc
+- [x] ADR-0028 LOC 11000→11200; DEPLOYMENT, THREAT_MODEL V3
+
+**DoD S2:** opt-in gVisor на Linux; V3 docker без регрессии; v3-gvisor зелёный при runsc; Firecracker — doc-only defer (Sprint 41+).
+
+---
+
+## Sprint 36 (архив вариантов B/C)
+
+<details>
+<summary>Варианты B и C (не выбраны)</summary>
+
+### Вариант B — «Дифференциатор»: L1 консолидация памяти ИЛИ L2 суб-агенты (ADR-0024)
+
+**Что это.** Один большой спринт про то, чего у конкурентов нет в верифицируемом виде. Выбрать **одно из двух** — оба сразу не влезут ни в спринт, ни в LOC-бюджет.
+
+- **L1 — LLM-консолидация памяти.** Сейчас курация детерминированная (staleness/dedup/decay, Sprint 6); Q-LLM-прогон по corroborated-фактам добавит слияние дублей-перефразировок и обобщение («5 фактов про кофе → 1 правило»). Ключевой инвариант: LLM только *предлагает* — результат идёт через существующий promotion gate (evidence + status_transitions), в память пишет детерминированный код, V4 (poisoning) не ослабляется. Cron-джоба, дефолт off (как self_improvement). Это ответ на «память Hermes = свалка заметок»: у нас консолидация с провенансом.
+- **L2 — суб-агенты для параллельного ресёрча.** «5 суб-агентов анализируют конкурентов» — самая громкая Hermes-фича. Наша версия: `/research-deep <тема>` порождает N независимых Q-LLM прогонов (каждый: свой запрос → `/fetch` → выжимка), P-LLM сводит результаты. Суб-агенты **без прав на действия by construction** (Q-LLM без tools — уже инвариант Sprint 7), бюджет-лимит на всю операцию, статус в дашборде. Отличие от конкурентов: у них суб-агент = полноценный агент с shell; у нас = карантинный читатель.
+
+Задачи (для любого из двух): ADR-0024 — механизм + точечное поднятие LOC-порога (S); реализация в `src/memory/` или `src/host/orchestrator/` (L); негативные security-тесты — V4 для L1 (консолидат не обходит promotion), V1+бюджет для L2 (суб-агент не может инициировать tool-call/выйти за лимит) (M); метрики в `/metrics` (S).
+
+**DoD (L1):** после cron-прогона дубли слиты с evidence-цепочкой, `/verify` показывает источник каждого консолидата; V4 зелёный. **DoD (L2):** `/research-deep` даёт сводку из ≥3 параллельных веток дешевле, чем 3 ручных `/research`; бюджет-стоп работает; V1 зелёный. **LOC ядра: +150–300 → ADR-0024 обязателен.**
+
+### Вариант C — «Security»: S1 broker на отдельном хосте
+
+**Что это.** Сейчас все четыре trust-домена — на одной машине: компрометация хоста ядра формально даёт и секрет-файлы broker. Вынос broker (Envoy + oauth-sidecar + imap-bridge) на отдельный хост (или VM/VLAN) делает V2-инвариант физическим: секреты на машине, куда ядро не имеет ssh, канал — только mTLS `ядро → broker`.
+
+Состав: `deploy/broker-remote/` — compose для выделенного хоста + mTLS между хостами (S/M); `aegis-setup`: `--broker-host`, генерация клиентских сертификатов, `verify` через сеть (M); DEPLOYMENT.md: топология, firewall-правила, миграция с одного хоста (M); THREAT_MODEL.md: пересмотр сценария «компрометация хоста ядра» (S); V2-расширение: тест «ядро не может прочитать секрет-файлы даже локально» (симуляция двумя контейнерами с разными сетями) (M).
+
+Ядро не растёт вообще (меняется только адрес broker в конфиге — он и так параметризован). Ценность — для публичного security-нарратива и продвинутой self-hosted ЦА; бытовой пользы ноль, поэтому вариант имеет смысл, когда «пищащие» фичи закрыты (а они после Sprint 32–34 в основном закрыты).
+
+**DoD:** эталонная установка на двух хостах по DEPLOYMENT.md; все коннекторы работают через удалённый broker; `verify` зелёный по сети; компрометация ядра-хоста не даёт секретов (негативный тест); LOC ядра: +0.
+
+### Рекомендация
+
+**A → B(L1) → C.** Вариант **A выбран** для Sprint 36.
+
+</details>
 
 ---
 
 ## После MVP (бэклог)
 
-Спринты 17+ — см. [`POST_MVP_FEATURES.md`](POST_MVP_FEATURES.md) (F7–F11).
+Спринты 17+ — см. [`POST_MVP_FEATURES.md`](POST_MVP_FEATURES.md) (F7–F11). **Полный список кандидатов — [`BACKLOG.md`](BACKLOG.md)**; C13–C19, U1/U3/U4, L3, S4/S5 нарезаны в спринты 32–35; U2/C20/S3, L1/L2, S1 — варианты Sprint 36 (см. выше). Остаток без спринта:
 
-- Дополнительные каналы (Slack, Signal — по одному, только официальные API; Matrix — Sprint 29)
-- Вынос broker на отдельный хост / micro-VM для sandbox
-- LLM-консолидация памяти (сверх детерминированной курации)
-- Мульти-модельные конфигурации (P-LLM / Q-LLM разных провайдеров)
-- C10 n8n-мост, C11 Playwright-автоматизация — go/no-go в Sprint 29, реализация Sprint 30+ при defer
+- S2 micro-VM sandbox (Firecracker/gVisor) — усиление V3, после S1
+- L2 или L1 — тот, что не выбран в Sprint 36 (вариант B)
+- C10 n8n / C11 Playwright — по критериям пересмотра из Sprint 30
+- Дополнительные каналы: Signal — только при появлении официального bot-API (или через Matrix-бридж владельца); WhatsApp/iMessage — не делаем (запрет Meta 2026-01, неофициальные транспорты)
 
 ---
 
@@ -500,6 +748,14 @@
 | 26     | Бытовые фичи: price tracker, IMAP, upgrade (C8) | email-канал живой |
 | 27     | 2FA-approve: out-of-band подтверждение |  **security-дифференциатор** |
 | 28     | Connectors волна 2: финансы, CalDAV/Notion (C9/C7) | паритет+ |
-| 29     | Matrix-канал (C12) + go/no-go C10/C11           | privacy-канал |
+| 29     | WebChat: локальный канал нулевой настройки      | **onboarding без внешних ботов** |
+| 30     | Matrix-канал (C12) + go/no-go C10/C11           | privacy-канал |
+| 31     | Slack-канал (C12) + позиция по Signal           | каналы закрыты |
+| 32     | Соцсети: C13 publishing (Postiz/X) + C15 триаж  | **сценарий №1 рынка** |
+| 33     | Контент-петля: C14 медиа + U1 голос             | контент-петля |
+| 34     | Быт: C17 медиатека, C18 закладки, PWA, дашборд  | быт закрыт |
+| 35     | Зрелость: L3 автокомпозиции, backup, health     | операционная зрелость |
+| 36     | Вариант A: U2 TTS, C20 travel, S3 dual-vendor     | быстрые победы — **done** |
+| 37     | L1 LLM-консолидация памяти                        | дифференциатор — **в работе** |
 
 Ориентир: ~10 спринтов ≈ 20 недель до MVP для команды 1–3 человека. Оценки уточняются после Sprint 0.

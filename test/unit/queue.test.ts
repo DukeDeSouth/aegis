@@ -76,6 +76,20 @@ describe('QueueStore', () => {
     expect(store.claim('inbound', 'w1')).toBeUndefined();
   });
 
+  it('release: сообщение снова доступно другому worker', () => {
+    const now = { value: 1_000 };
+    const store = makeStore('release.db', now);
+    const id = store.publish('outbound', '{"text":"hi","session_id":"webchat:local"}', 'system');
+
+    const claimed = store.claim('outbound', 'telegram');
+    expect(claimed?.id).toBe(id);
+    expect(claimed?.attempts).toBe(1);
+    store.release(id);
+    const again = store.claim('outbound', 'webchat');
+    expect(again?.id).toBe(id);
+    expect(again?.attempts).toBe(1);
+  });
+
   it('FIFO: сообщения выдаются в порядке created_at', () => {
     const now = { value: 1_000 };
     const store = makeStore('fifo.db', now);

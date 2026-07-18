@@ -1,0 +1,7 @@
+{
+  "name": "aegis-webchat",
+  "version": "0.1.0",
+  "description": "Local WebChat UI for AEGIS (Sprint 29)",
+  "license": "MIT",
+  "private": true
+}

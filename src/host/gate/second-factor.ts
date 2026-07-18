@@ -1,5 +1,5 @@
 import type { ApproveChannel, ChannelKind } from './channels.ts';
-import { channelFromSession, channelLabel, otherChannel } from './channels.ts';
+import { channelFromSession, channelLabel, pickAlternateChannel } from './channels.ts';
 import type { ActionClass } from './types.ts';
 
 export interface SecondFactorConfig {
@@ -11,6 +11,9 @@ export interface SecondFactorConfig {
 export interface PairedChannels {
   readonly telegram: boolean;
   readonly discord: boolean;
+  readonly webchat: boolean;
+  readonly matrix: boolean;
+  readonly slack: boolean;
 }
 
 export function resolveRequiredChannel(
@@ -22,8 +25,15 @@ export function resolveRequiredChannel(
 ): ApproveChannel | null {
   if (!cfg?.enabled || !cfg.action_classes.includes(actionClass)) return null;
   const origin = channelFromSession(originSessionId);
-  if (cfg.modes.includes('cross_channel') && paired.telegram && paired.discord && origin) {
-    return otherChannel(origin);
+  const pairedCount =
+    Number(paired.telegram) +
+    Number(paired.discord) +
+    Number(paired.webchat) +
+    Number(paired.matrix) +
+    Number(paired.slack);
+  if (cfg.modes.includes('cross_channel') && pairedCount >= 2 && origin) {
+    const alt = pickAlternateChannel(origin, paired);
+    if (alt) return alt;
   }
   if (cfg.modes.includes('totp') && totpConfigured) return 'totp';
   return null;

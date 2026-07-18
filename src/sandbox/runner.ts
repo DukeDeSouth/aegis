@@ -19,6 +19,8 @@ export interface ExecResult {
 
 export type ExecFn = (argv: string[]) => Promise<ExecResult>;
 
+export type SandboxRuntime = 'docker' | 'gvisor';
+
 export interface DockerSandboxOptions {
   /** Образ sandbox, пиннится как tag@digest. */
   image: string;
@@ -26,6 +28,8 @@ export interface DockerSandboxOptions {
   internalNetwork: string;
   /** F4: rw-mount workspace в контейнер как /workspace. */
   workspaceDir?: string;
+  /** gVisor runsc (Linux); default docker — hardened-профиль тот же. */
+  runtime?: SandboxRuntime;
   /** Инжектируется в тестах; по умолчанию — execFile('docker', ...). */
   exec?: ExecFn;
 }
@@ -54,6 +58,7 @@ export function buildRunArgs(opts: {
   image: string;
   internalNetwork: string;
   workspaceDir?: string;
+  runtime?: SandboxRuntime;
   env?: Record<string, string>;
   extraMounts?: readonly { hostPath: string; containerPath: string; readOnly?: boolean }[];
 }): string[] {
@@ -63,8 +68,11 @@ export function buildRunArgs(opts: {
     throw new Error(`sandbox: entrypoint must be a relative path inside skillDir`);
   }
   const network = limits.allowedHosts.length === 0 ? 'none' : internalNetwork;
-  const args = [
-    'run',
+  const args = ['run'];
+  if (opts.runtime === 'gvisor') {
+    args.push('--runtime', 'runsc');
+  }
+  args.push(
     '--rm',
     '--name',
     name,
@@ -89,7 +97,7 @@ export function buildRunArgs(opts: {
     '64',
     '-v',
     `${resolve(skillDir)}:/skill:ro`,
-  ];
+  );
   if (workspaceDir) {
     args.push('-v', `${resolve(workspaceDir)}:/workspace:rw`);
   }
@@ -112,12 +120,14 @@ export class DockerSandboxRunner implements SandboxRunner {
   private readonly image: string;
   private readonly internalNetwork: string;
   private readonly workspaceDir: string | undefined;
+  private readonly runtime: SandboxRuntime;
   private readonly exec: ExecFn;
 
   constructor(opts: DockerSandboxOptions) {
     this.image = opts.image;
     this.internalNetwork = opts.internalNetwork;
     this.workspaceDir = opts.workspaceDir;
+    this.runtime = opts.runtime ?? 'docker';
     this.exec = opts.exec ?? defaultExec;
   }
 
@@ -136,6 +146,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       limits,
       image: opts?.image ?? this.image,
       internalNetwork: this.internalNetwork,
+      runtime: this.runtime,
       ...(this.workspaceDir !== undefined ? { workspaceDir: this.workspaceDir } : {}),
       ...(env !== undefined ? { env } : {}),
       ...(opts?.extraMounts !== undefined ? { extraMounts: opts.extraMounts } : {}),

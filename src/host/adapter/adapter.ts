@@ -6,6 +6,8 @@
  * sender:   claim('outbound') → sendMessage → ack | retry (visibility timeout) | dead.
  */
 import { timingSafeEqual } from 'node:crypto';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { AuditLog } from '../audit/log.ts';
 import type { QueueStore } from '../queue/store.ts';
 import { parseOutboundPayload } from '../orchestrator/message.ts';
@@ -13,12 +15,20 @@ import { classifyUpdate, extractUntrustedBody } from './policy.ts';
 import type { ChannelState } from './state.ts';
 import { TG_SESSION_PREFIX, type ChannelAdapter } from './channel.ts';
 import { TelegramError, type TelegramClient, type TgUpdate } from './telegram-client.ts';
+import {
+  MAX_VOICE_BYTES,
+  MAX_VOICE_DURATION_SEC,
+  isSafeVoiceRelPath,
+  type VoiceTranscriber,
+} from './voice.ts';
 
 export interface TelegramAdapterOptions {
   worker?: string;
   pollMs?: number;
   maxBackoffMs?: number;
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
+  voiceTranscriber?: VoiceTranscriber;
+  workspaceDir?: string;
 }
 
 const ACTOR = 'adapter';
@@ -60,7 +70,8 @@ export class TelegramAdapter implements ChannelAdapter {
   private readonly pollMs: number;
   private readonly maxBackoffMs: number;
   private readonly sleep: (ms: number, signal: AbortSignal) => Promise<void>;
-  private pollHealthy = true;
+  private readonly voiceTranscriber: VoiceTranscriber | undefined;
+  private readonly workspaceDir: string | undefined;
 
   constructor(
     client: TelegramClient,
@@ -83,7 +94,11 @@ export class TelegramAdapter implements ChannelAdapter {
     this.pollMs = opts.pollMs ?? 500;
     this.maxBackoffMs = opts.maxBackoffMs ?? 30_000;
     this.sleep = opts.sleep ?? defaultSleep;
+    this.voiceTranscriber = opts.voiceTranscriber;
+    this.workspaceDir = opts.workspaceDir;
   }
+
+  private pollHealthy = true;
 
   async run(signal: AbortSignal): Promise<void> {
     await Promise.all([this.runReceiver(signal), this.runSender(signal)]);
@@ -147,6 +162,10 @@ export class TelegramAdapter implements ChannelAdapter {
   /** Доставка ответов: transient-ошибка возвращает сообщение через visibility timeout. */
   async runSender(signal: AbortSignal): Promise<void> {
     while (!signal.aborted) {
+      if (this.state.getOwnerUserId() === undefined) {
+        await this.sleep(this.pollMs, signal);
+        continue;
+      }
       const had = await this.processOutbound();
       if (!had) await this.sleep(this.pollMs, signal);
     }
@@ -170,8 +189,7 @@ export class TelegramAdapter implements ChannelAdapter {
 
     const payload = parseOutboundPayload(msg.payload);
     const chatId = payload ? chatIdFromSession(payload.session_id) : undefined;
-    if (!payload || chatId === undefined) {
-      // Не tg-сессия или битый payload: единственный канал MVP — помечаем dead (см. SIMULATION).
+    if (!payload) {
       this.queues.markDead(msg.id);
       this.audit.append({
         actor: ACTOR,
@@ -181,8 +199,46 @@ export class TelegramAdapter implements ChannelAdapter {
       });
       return true;
     }
+    if (chatId === undefined) {
+      this.queues.release(msg.id);
+      return true;
+    }
 
     try {
+      if (
+        payload.voice_rel_path !== undefined &&
+        this.workspaceDir !== undefined &&
+        isSafeVoiceRelPath(payload.voice_rel_path)
+      ) {
+        let sentVoice = false;
+        try {
+          const audio = readFileSync(join(this.workspaceDir, payload.voice_rel_path));
+          await this.client.sendVoice(chatId, audio);
+          sentVoice = true;
+        } catch {
+          // fall through to text
+        }
+        if (sentVoice) {
+          this.queues.ack(msg.id);
+          this.audit.append({
+            actor: ACTOR,
+            action: 'message.sent_voice',
+            decision: 'info',
+            payload: {
+              messageId: msg.id,
+              sessionId: payload.session_id,
+              voiceRelPath: payload.voice_rel_path,
+            },
+          });
+          return true;
+        }
+        this.audit.append({
+          actor: ACTOR,
+          action: 'voice.send_fallback',
+          decision: 'info',
+          payload: { messageId: msg.id, sessionId: payload.session_id },
+        });
+      }
       await this.client.sendMessage(chatId, payload.text);
       this.queues.ack(msg.id);
       this.audit.append({
@@ -222,6 +278,9 @@ export class TelegramAdapter implements ChannelAdapter {
           decision: 'info',
           payload: { updateId: update.update_id, provenance: 'owner' },
         });
+        break;
+      case 'owner_voice':
+        await this.handleOwnerVoice(update.update_id, c.chatId, c.voice);
         break;
       case 'approve_attempt':
         this.queues.publish(
@@ -330,6 +389,69 @@ export class TelegramAdapter implements ChannelAdapter {
         decision: 'info',
         payload: { error: err instanceof Error ? err.message : String(err) },
       });
+    }
+  }
+
+  private async handleOwnerVoice(
+    updateId: number,
+    chatId: number,
+    voice: { file_id: string; file_unique_id: string; duration: number; file_size?: number },
+  ): Promise<void> {
+    const session = `${TG_SESSION_PREFIX}${chatId}`;
+    if (this.voiceTranscriber === undefined || this.workspaceDir === undefined) {
+      await this.trySend(chatId, 'Voice notes require STT configuration (Sprint 33).');
+      this.audit.append({
+        actor: ACTOR,
+        action: 'voice.stt_unconfigured',
+        decision: 'info',
+        payload: { updateId },
+      });
+      return;
+    }
+    if (voice.duration > MAX_VOICE_DURATION_SEC) {
+      await this.trySend(chatId, `Voice too long (max ${MAX_VOICE_DURATION_SEC}s).`);
+      return;
+    }
+    try {
+      const meta = await this.client.getFile(voice.file_id);
+      if (meta.file_size !== undefined && meta.file_size > MAX_VOICE_BYTES) {
+        await this.trySend(chatId, 'Voice file too large.');
+        return;
+      }
+      const bytes = await this.client.downloadFile(meta.file_path);
+      if (bytes.length > MAX_VOICE_BYTES) {
+        await this.trySend(chatId, 'Voice file too large.');
+        return;
+      }
+      const rel = join('incoming', `${voice.file_unique_id}.ogg`);
+      const abs = join(this.workspaceDir, rel);
+      mkdirSync(join(this.workspaceDir, 'incoming'), { recursive: true });
+      writeFileSync(abs, bytes);
+      const transcript = await this.voiceTranscriber.transcribe(rel);
+      this.queues.publish(
+        'inbound',
+        JSON.stringify({
+          kind: 'quarantine_content',
+          source: 'voice',
+          body: transcript,
+          session_id: session,
+        }),
+        'quarantine',
+      );
+      this.audit.append({
+        actor: ACTOR,
+        action: 'voice.transcribed',
+        decision: 'info',
+        payload: { updateId, duration: voice.duration, bytes: bytes.length },
+      });
+    } catch (err) {
+      this.audit.append({
+        actor: ACTOR,
+        action: 'voice.failed',
+        decision: 'info',
+        payload: { updateId, error: err instanceof Error ? err.message : String(err) },
+      });
+      await this.trySend(chatId, 'Could not transcribe voice note.');
     }
   }
 }

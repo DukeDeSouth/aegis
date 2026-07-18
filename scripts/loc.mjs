@@ -3,7 +3,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const LIMIT = 8100; // ADR-0013: Sprint 28 C9 finance dispatch
+const LIMIT = 11200; // ADR-0028: Sprint 40 S2 gVisor sandbox runtime
 
 function countDir(dir) {
   let total = 0;

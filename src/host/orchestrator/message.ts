@@ -63,6 +63,7 @@ const outboundPayloadSchema = z
   .object({
     text: z.string().min(1),
     session_id: z.string().min(1),
+    voice_rel_path: z.string().min(1).optional(),
   })
   .strict();
 

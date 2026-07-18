@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "name": "media-pipeline",
+  "version": "0.1.0",
+  "needs": ["sandbox.run", "files.read", "files.write"],
+  "network": [],
+  "action_class": "reversible",
+  "code": true,
+  "entrypoints": ["transcode.sh", "subtitles.sh", "voice-transcribe.sh"]
+}

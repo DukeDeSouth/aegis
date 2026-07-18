@@ -43,8 +43,8 @@ function seedWorld(): DashboardConfig {
   const memoryDb = openDb(join(dataDir, 'memory.db'));
   applyMigration(queueDb, migration('0001-queue.sql'), 1);
   applyMigration(queueDb, migration('0003-queue.sql'), 3);
-  applyMigration(queueDb, migration('0009-queue.sql'), 9);
   applyMigration(queueDb, migration('0004-budget.sql'), 4);
+  applyMigration(queueDb, migration('0009-queue.sql'), 9);
   applyMigration(auditDb, migration('0001-audit.sql'), 1);
   applyMigration(memoryDb, migration('0001-memory.sql'), 1);
   applyMigration(memoryDb, migration('0007-memory.sql'), 7);
@@ -86,6 +86,9 @@ function seedWorld(): DashboardConfig {
   return {
     dataDir,
     skillsDir,
+    configPath: join(root, 'aegis.config.json'),
+    mcpServers: [],
+    healthUrl: 'http://127.0.0.1:1/health',
     host: '127.0.0.1',
     port: 0,
     budgetLimit: 100_000,
@@ -94,9 +97,9 @@ function seedWorld(): DashboardConfig {
 }
 
 describe('aegis-dashboard (F11)', () => {
-  it('render escapes quarantine injection in HTML', () => {
+  it('render escapes quarantine injection in HTML', async () => {
     const cfg = seedWorld();
-    const html = renderDashboard(collectDashboardData(cfg, 1_750_000_000_000));
+    const html = renderDashboard(await collectDashboardData(cfg, 1_750_000_000_000));
     expect(html).not.toContain('<img src=x');
     expect(html).toContain('&lt;img');
     expect(html).toContain('Confirm in Discord');

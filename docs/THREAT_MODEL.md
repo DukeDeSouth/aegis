@@ -33,14 +33,16 @@
 Заставить агент прочитать и отправить ключ.
 
 - **Митигация:** broker — агент никогда не видит реальный ключ (TRUST_DOMAINS §3); sandbox имеет deny-all egress, трафик только через broker-proxy.
-- **Остаточный риск:** broker и агент на общем kernel — уязвимость ядра снимает границу; выносить broker на отдельный хост в приоритете после MVP.
+- **Остаточный риск (local broker):** broker и агент на общем kernel — уязвимость ядра снимает границу; **S1 remote broker** (ADR-0027) выносит секреты на отдельный хост + mTLS.
+- **Остаточный риск (remote broker):** компрометация broker-хоста; компрометация core даёт client cert (impersonation), но не secret files.
 
 ### V3. Выход исполнения за пределы sandbox
 
 Навык/код пытается достать файлы хоста или сеть.
 
 - **Митигация:** контейнер с границей ОС, non-root, allowlist mount, deny-all egress (TRUST_DOMAINS §2). Состояние хоста недоступно.
-- **Остаточный риск:** escape контейнер-рантайма — использовать micro-VM для чувствительных конфигураций.
+- **Остаточный риск (docker runtime):** escape shared-kernel runc — для Linux prod: **gVisor runsc** opt-in (`sandbox.runtime: gvisor`, ADR-0028, `deploy/gvisor/`).
+- **Остаточный риск (gvisor):** syscall/emulation gaps — micro-VM (Firecracker/Kata) для максимальной изоляции (Sprint 41+).
 
 ### V4. Self-poisoning памяти
 

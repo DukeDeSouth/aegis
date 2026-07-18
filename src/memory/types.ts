@@ -10,7 +10,13 @@ export type EpistemicStatus = (typeof EPISTEMIC_STATUSES)[number];
 export const KNOWLEDGE_KINDS = ['fact', 'procedure', 'skill'] as const;
 export type KnowledgeKind = (typeof KNOWLEDGE_KINDS)[number];
 
-export const MEMORY_PROVENANCES = ['owner', 'orchestrator', 'quarantine', 'background'] as const;
+export const MEMORY_PROVENANCES = [
+  'owner',
+  'orchestrator',
+  'quarantine',
+  'background',
+  'consolidation',
+] as const;
 export type MemoryProvenance = (typeof MEMORY_PROVENANCES)[number];
 
 export const EVIDENCE_TYPES = [
@@ -18,5 +24,6 @@ export const EVIDENCE_TYPES = [
   'reproduced_observation',
   'owner_confirmation',
   'external_source',
+  'llm_proposal',
 ] as const;
 export type EvidenceType = (typeof EVIDENCE_TYPES)[number];

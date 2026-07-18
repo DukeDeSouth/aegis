@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "name": "medialibrary",
+  "description": "Jellyfin + Radarr + Sonarr homelab media stack (C17)",
+  "skill": true,
+  "broker_routes": [],
+  "broker_listeners": [
+    {
+      "id": "jellyfin",
+      "port": 8087,
+      "secret_name": "jellyfin_token",
+      "sds_path": "/etc/broker/jellyfin/secret.yaml",
+      "credential_header": "x-emby-token",
+      "header_value_prefix": "",
+      "routes": [
+        {
+          "host": "jellyfin.local",
+          "cluster_address": "127.0.0.1",
+          "cluster_port": 8096,
+          "tls": false
+        }
+      ]
+    },
+    {
+      "id": "radarr",
+      "port": 8088,
+      "secret_name": "radarr_token",
+      "sds_path": "/etc/broker/radarr/secret.yaml",
+      "credential_header": "x-api-key",
+      "header_value_prefix": "",
+      "routes": [
+        {
+          "host": "radarr.local",
+          "cluster_address": "127.0.0.1",
+          "cluster_port": 7878,
+          "tls": false
+        }
+      ]
+    },
+    {
+      "id": "sonarr",
+      "port": 8089,
+      "secret_name": "sonarr_token",
+      "sds_path": "/etc/broker/sonarr/secret.yaml",
+      "credential_header": "x-api-key",
+      "header_value_prefix": "",
+      "routes": [
+        {
+          "host": "sonarr.local",
+          "cluster_address": "127.0.0.1",
+          "cluster_port": 8989,
+          "tls": false
+        }
+      ]
+    }
+  ],
+  "config_hints": [
+    "Set cluster_address in envoy to your Jellyfin/Radarr/Sonarr LAN IPs (see deploy/broker/{jellyfin,radarr,sonarr}/README.md)",
+    "mcp server → { \"name\": \"medialibrary\", \"transport\": \"stdio\", \"command\": [\"node\", \"server.mjs\"], \"server_dir\": \"./connectors/medialibrary/server\", \"allowed_hosts\": [\"aegis-broker\"], \"tools\": [ {\"name\": \"jellyfin_library_search\", \"action_class\": \"read-only\"}, {\"name\": \"jellyfin_item_get\", \"action_class\": \"read-only\"}, {\"name\": \"jellyfin_sessions_list\", \"action_class\": \"read-only\"}, {\"name\": \"jellyfin_item_delete\", \"action_class\": \"irreversible\"}, {\"name\": \"radarr_movie_search\", \"action_class\": \"read-only\"}, {\"name\": \"radarr_queue_list\", \"action_class\": \"read-only\"}, {\"name\": \"radarr_wanted_missing\", \"action_class\": \"read-only\"}, {\"name\": \"radarr_movie_add\", \"action_class\": \"reversible\"}, {\"name\": \"radarr_movie_delete\", \"action_class\": \"irreversible\"}, {\"name\": \"sonarr_series_search\", \"action_class\": \"read-only\"}, {\"name\": \"sonarr_queue_list\", \"action_class\": \"read-only\"}, {\"name\": \"sonarr_series_add\", \"action_class\": \"reversible\"}, {\"name\": \"sonarr_series_delete\", \"action_class\": \"irreversible\"} ] }"
+  ]
+}

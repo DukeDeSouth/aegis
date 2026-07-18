@@ -233,6 +233,50 @@ describe('0008-queue.sql', () => {
   });
 });
 
+describe('0014-memory.sql', () => {
+  const db = openDb(join(tmp, 'memory-v14.db'));
+  applyMigration(db, readFileSync(new URL('../../migrations/0001-memory.sql', import.meta.url), 'utf8'), 1);
+  const sql = readFileSync(new URL('../../migrations/0014-memory.sql', import.meta.url), 'utf8');
+  applyMigration(db, sql, 14);
+  applyMigration(db, sql, 14);
+
+  it('provenance consolidation только unverified', () => {
+    db.prepare(
+      `INSERT INTO knowledge (kind, title, body, epistemic_status, provenance, created_at, updated_at)
+       VALUES ('fact', 'C', 'body', 'unverified', 'consolidation', ?, ?)`,
+    ).run(NOW, NOW);
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO knowledge (kind, title, body, epistemic_status, provenance, created_at, updated_at)
+         VALUES ('fact', 'Bad', 'x', 'corroborated', 'consolidation', ?, ?)`,
+        )
+        .run(NOW, NOW),
+    ).toThrow(/untrusted provenance/);
+  });
+
+  it('evidence llm_proposal и gate llm_consolidate', () => {
+    const kid = db
+      .prepare(`SELECT id FROM knowledge WHERE provenance = 'consolidation'`)
+      .get() as { id: number };
+    db.prepare(
+      `INSERT INTO evidence (knowledge_id, evidence_type, summary, created_at)
+       VALUES (?, 'llm_proposal', 'sources', ?)`,
+    ).run(kid.id, NOW);
+    db.prepare(
+      `INSERT INTO status_transitions (knowledge_id, from_status, to_status, gate, created_at)
+       VALUES (?, 'unverified', 'refuted', 'llm_consolidate', ?)`,
+    ).run(kid.id, NOW);
+    expect(db.prepare('SELECT COUNT(*) c FROM evidence WHERE evidence_type = ?').get('llm_proposal')).toEqual({
+      c: 1,
+    });
+  });
+
+  it('user_version = 14 после миграции', () => {
+    expect(db.pragma('user_version', { simple: true })).toBe(14);
+  });
+});
+
 describe('0001-audit.sql', () => {
   const db = freshDb('0001-audit.sql', 'audit.db');
 

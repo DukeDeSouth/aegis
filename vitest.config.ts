@@ -5,6 +5,6 @@ export default defineConfig({
     include: ['test/**/*.test.ts'],
     // Security-контур требует Docker и работает минуты — отдельный конфиг
     // vitest.security.config.ts (npm run test:security).
-    exclude: ['test/security/**', '**/node_modules/**'],
+    exclude: ['test/security/**', 'test/live/**', '**/node_modules/**'],
   },
 });

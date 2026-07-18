@@ -127,6 +127,20 @@ export class KnowledgeStore {
     return rows.map(toRow);
   }
 
+  /** L1: corroborated facts for Q-LLM consolidation batch (least-used first). */
+  listForConsolidation(limit: number): KnowledgeRow[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, kind, title, body, epistemic_status, provenance, created_at, updated_at
+         FROM knowledge
+         WHERE epistemic_status = 'corroborated' AND kind = 'fact'
+         ORDER BY use_count ASC, updated_at ASC
+         LIMIT ?`,
+      )
+      .all(limit) as RawKnowledge[];
+    return rows.map(toRow);
+  }
+
   truncateBody(body: string): string {
     if (body.length <= MAX_BODY_INJECT) return body;
     return `${body.slice(0, MAX_BODY_INJECT)}…`;

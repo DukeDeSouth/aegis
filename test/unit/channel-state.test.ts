@@ -80,4 +80,43 @@ describe('ChannelState', () => {
     state.setEmailLastUid(8);
     expect(state.getEmailLastUid()).toBe(8);
   });
+
+  it('Sprint 29: webchat paired + session token write-once', () => {
+    const db = makeDb('wc.db', true);
+    applyMigration(db, migration('0010-queue.sql'), 10);
+    const state = new ChannelState(db);
+    expect(state.isWebchatPaired()).toBe(false);
+    state.setWebchatPaired();
+    state.setWebchatSessionToken('secret-token');
+    expect(state.isWebchatPaired()).toBe(true);
+    expect(state.getWebchatSessionToken()).toBe('secret-token');
+    expect(() => state.setWebchatPaired()).toThrow(/already paired/);
+    expect(() => state.setWebchatSessionToken('other')).toThrow(/already paired/);
+    state.replaceWebchatSessionToken('rotated');
+    expect(state.getWebchatSessionToken()).toBe('rotated');
+  });
+
+  it('Sprint 30: matrix owner write-once + sync token overwrite', () => {
+    const db = makeDb('mx.db', true);
+    applyMigration(db, migration('0010-queue.sql'), 10);
+    applyMigration(db, migration('0011-queue.sql'), 11);
+    const state = new ChannelState(db);
+    state.setMatrixOwnerUserId('@owner:example.org');
+    expect(state.getMatrixOwnerUserId()).toBe('@owner:example.org');
+    expect(() => state.setMatrixOwnerUserId('@other:example.org')).toThrow(/already paired/);
+    state.setMatrixSyncToken('s1');
+    state.setMatrixSyncToken('s2');
+    expect(state.getMatrixSyncToken()).toBe('s2');
+  });
+
+  it('Sprint 31: slack owner write-once', () => {
+    const db = makeDb('sl.db', true);
+    applyMigration(db, migration('0010-queue.sql'), 10);
+    applyMigration(db, migration('0011-queue.sql'), 11);
+    applyMigration(db, migration('0012-queue.sql'), 12);
+    const state = new ChannelState(db);
+    state.setSlackOwnerUserId('UOWNER');
+    expect(state.getSlackOwnerUserId()).toBe('UOWNER');
+    expect(() => state.setSlackOwnerUserId('UOTHER')).toThrow(/already paired/);
+  });
 });

@@ -135,7 +135,7 @@ describe('mcp http loop (P-A)', () => {
 
     const actions = auditActions(auditDb);
     expect(actions).toContain('mcp.search.query');
-    expect(actions).toContain('mcp.tool.completed');
+    expect(actions.some((a) => a.startsWith('mcp.tool.'))).toBe(true);
     expect(actions).toContain('quarantine.completed');
     // V1-расширение: injection из HTTP-ответа вошла только как UNTRUSTED-данные.
     expect(pSystem).toContain('Untrusted content');

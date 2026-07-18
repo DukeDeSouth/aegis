@@ -46,7 +46,16 @@ npm run setup init
 npm run setup verify
 ```
 
-Первый запуск: создать бота у @BotFather, задать env-переменные и написать боту `/pair <код>` со своего аккаунта — с этого момента бот отвечает только вам (владелец фиксируется в `channel_state`, повторный pairing невозможен). Чужие сообщения молча отклоняются с записью в audit log.
+Первый запуск: `npm run setup init` → откройте **WebChat** `http://127.0.0.1:8790` и введите pairing-код из консоли (≤2 мин без внешних ботов). Опционально: Telegram — создать бота у @BotFather, задать env и `/pair <код>`; Discord/Matrix/Slack — см. [`docs/CONNECTORS.md`](docs/CONNECTORS.md) §C12.
+
+### Каналы общения vs коннекторы
+
+| Тип | Назначение | Примеры |
+|-----|------------|---------|
+| **Канал** | Control-plane: диалог, `/approve`, pairing | WebChat (`127.0.0.1:8790`), Telegram, Discord DM, Matrix DM, Slack DM |
+| **Коннектор** | Данные и действия через gate (`/mcp`) | Google, GitHub, finance, CalDAV |
+
+Коннектор без канала не даёт владельцу безопасно командовать агентом. WebChat включён в `aegis-setup init` по умолчанию.
 
 ## Карта документов
 

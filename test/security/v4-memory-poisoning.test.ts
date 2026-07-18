@@ -218,4 +218,26 @@ describe('V4 memory poisoning', () => {
     expect(capturedSystem).not.toContain('DRAFT POISON INJECT');
     rmSync(skillsDir, { recursive: true, force: true });
   });
+
+  it('consolidation provenance остаётся unverified и не инжектируется (L1 / V4)', () => {
+    const memoryDb = openDb(join(tmp, 'v4e-memory.db'));
+    applyMigration(memoryDb, migration('0001-memory.sql'), 1);
+    applyMigration(memoryDb, migration('0014-memory.sql'), 14);
+
+    const knowledge = new KnowledgeStore(memoryDb, { now: () => NOW });
+    const id = knowledge.insert({
+      title: 'Merged rule',
+      body: POISON_BODY,
+      provenance: 'consolidation',
+    });
+    expect(knowledge.listForInjection()).toHaveLength(0);
+    expect(
+      () =>
+        memoryDb
+          .prepare(
+            `UPDATE knowledge SET epistemic_status = 'corroborated' WHERE id = ?`,
+          )
+          .run(id),
+    ).toThrow(/corroborated requires/);
+  });
 });

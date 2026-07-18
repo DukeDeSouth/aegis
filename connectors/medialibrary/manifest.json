@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "name": "medialibrary",
+  "version": "0.1.0",
+  "needs": ["web.fetch", "messages.send"],
+  "network": ["aegis-broker"],
+  "action_class": "read-only",
+  "code": false,
+  "entrypoints": []
+}

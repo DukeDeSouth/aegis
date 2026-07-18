@@ -35,10 +35,33 @@ export function resolveInstallPaths(root: string) {
     compose: join(deploy, 'docker-compose.yml'),
     composeEnv: join(deploy, '.env'),
     brokerToken: join(deploy, 'broker', 'token.txt'),
+    brokerRemoteToken: join(deploy, 'broker-remote', 'secrets', 'token.txt'),
     manifest: join(root, '.aegis-setup.json'),
     brokerEnvoy: join(deploy, 'broker', 'envoy.yaml'),
+    brokerRemoteEnvoy: join(deploy, 'broker-remote', 'envoy.yaml'),
+    brokerClientEnvoy: join(deploy, 'broker-client', 'envoy.yaml'),
     brokerSecretYaml: join(deploy, 'broker', 'secret.yaml'),
+    brokerRemoteSecretYaml: join(deploy, 'broker-remote', 'secret.yaml'),
   };
+}
+
+export interface SetupManifest {
+  readonly setup_version?: number;
+  readonly broker_mode?: 'local' | 'remote';
+  readonly broker_remote_host?: string;
+}
+
+export function readManifest(root: string): SetupManifest {
+  const text = readText(resolveInstallPaths(root).manifest);
+  if (text === undefined) return {};
+  return JSON.parse(text) as SetupManifest;
+}
+
+/** Envoy file that receives connector routes (local vs remote broker host). */
+export function resolveBrokerEnvoyPath(root: string): string {
+  const paths = resolveInstallPaths(root);
+  if (readManifest(root).broker_mode === 'remote') return paths.brokerRemoteEnvoy;
+  return paths.brokerEnvoy;
 }
 
 export function bundledBrokerDir(): string {

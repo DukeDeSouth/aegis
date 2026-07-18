@@ -6,7 +6,7 @@
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { resolveInstallPaths } from './fs.ts';
+import { resolveBrokerEnvoyPath, resolveInstallPaths } from './fs.ts';
 
 export interface BrokerRoute {
   readonly host: string;
@@ -24,6 +24,12 @@ export interface BrokerListener {
   readonly secret_name: string;
   readonly sds_path: string;
   readonly routes: readonly BrokerRoute[];
+  /** Suffix for multi-listener presets (e.g. jellyfin, radarr). */
+  readonly id?: string;
+  /** Injected header name; default Authorization via header_value_prefix. */
+  readonly credential_header?: string;
+  /** Default `Bearer ` — Postiz (C13) uses `""` for raw Authorization API key. */
+  readonly header_value_prefix?: string;
 }
 
 export interface ConnectorPreset {
@@ -32,6 +38,7 @@ export interface ConnectorPreset {
   readonly skill: boolean;
   readonly broker_routes: readonly BrokerRoute[];
   readonly broker_listener?: BrokerListener;
+  readonly broker_listeners?: readonly BrokerListener[];
   readonly config_hints: readonly string[];
   readonly dir: string;
 }
@@ -46,8 +53,42 @@ export function marker(name: string): string {
 }
 
 /** Маркер listener-блока: не участвует в парном инварианте vhost/cluster. */
-export function listenerMarker(name: string): string {
-  return `# connector:${name} listener`;
+export function listenerMarker(name: string, id?: string): string {
+  return id !== undefined && id.length > 0
+    ? `# connector:${name} listener ${id}`
+    : `# connector:${name} listener`;
+}
+
+function parseBrokerListener(raw: Record<string, unknown>, connectorName: string): BrokerListener {
+  const l = raw as unknown as BrokerListener;
+  if (
+    !Number.isInteger(l.port) ||
+    !l.secret_name ||
+    !l.sds_path ||
+    !Array.isArray(l.routes) ||
+    l.routes.length === 0
+  ) {
+    throw new Error(`connector ${connectorName}: malformed broker_listener`);
+  }
+  for (const r of l.routes) {
+    if (!r.host || !r.cluster_address || !Number.isInteger(r.cluster_port)) {
+      throw new Error(`connector ${connectorName}: malformed broker_listener route`);
+    }
+  }
+  return l;
+}
+
+function collectListeners(raw: Record<string, unknown>, name: string): BrokerListener[] {
+  const out: BrokerListener[] = [];
+  if (Array.isArray(raw.broker_listeners)) {
+    for (const item of raw.broker_listeners) {
+      out.push(parseBrokerListener(item as Record<string, unknown>, name));
+    }
+  }
+  if (raw.broker_listener !== undefined) {
+    out.push(parseBrokerListener(raw.broker_listener as Record<string, unknown>, name));
+  }
+  return out;
 }
 
 export function loadPreset(connectorsDir: string, name: string): ConnectorPreset {
@@ -65,23 +106,9 @@ export function loadPreset(connectorsDir: string, name: string): ConnectorPreset
     }
   }
   let listener: BrokerListener | undefined;
+  const brokerListeners = collectListeners(raw, name);
   if (raw.broker_listener !== undefined) {
-    const l = raw.broker_listener as BrokerListener;
-    if (
-      !Number.isInteger(l.port) ||
-      !l.secret_name ||
-      !l.sds_path ||
-      !Array.isArray(l.routes) ||
-      l.routes.length === 0
-    ) {
-      throw new Error(`connector ${name}: malformed broker_listener`);
-    }
-    for (const r of l.routes) {
-      if (!r.host || !r.cluster_address || !Number.isInteger(r.cluster_port)) {
-        throw new Error(`connector ${name}: malformed broker_listener route`);
-      }
-    }
-    listener = l;
+    listener = brokerListeners[brokerListeners.length - 1];
   }
   return {
     name,
@@ -89,6 +116,7 @@ export function loadPreset(connectorsDir: string, name: string): ConnectorPreset
     skill: raw.skill === true,
     broker_routes: routes,
     ...(listener !== undefined ? { broker_listener: listener } : {}),
+    ...(brokerListeners.length > 0 ? { broker_listeners: brokerListeners } : {}),
     config_hints: Array.isArray(raw.config_hints) ? (raw.config_hints as string[]) : [],
     dir,
   };
@@ -167,11 +195,25 @@ function listenerVhost(name: string, route: BrokerRoute, i: number): string[] {
  * Целый listener c собственным credential_injector: секрет из l.sds_path
  * инжектится ТОЛЬКО в маршруты этого порта (изоляция от broker_token :8080).
  */
-function listenerBlock(name: string, l: BrokerListener, clusterOffset: number): string {
+function listenerBlock(
+  name: string,
+  l: BrokerListener,
+  clusterOffset: number,
+  listenerId?: string,
+): string {
   const vhosts = l.routes.flatMap((r, i) => listenerVhost(name, r, clusterOffset + i));
+  const prefix = l.header_value_prefix ?? 'Bearer ';
+  const listenerName =
+    listenerId !== undefined && listenerId.length > 0
+      ? `conn-${name}-${listenerId}-listener`
+      : `conn-${name}-listener`;
+  const headerLines =
+    l.credential_header !== undefined && l.credential_header.length > 0
+      ? [`                      header: ${l.credential_header}`, `                      header_value_prefix: '${prefix}'`]
+      : [`                      header_value_prefix: '${prefix}'`];
   return [
-    listenerMarker(name),
-    `- name: conn-${name}-listener`,
+    listenerMarker(name, listenerId),
+    `- name: ${listenerName}`,
     `  address:`,
     `    socket_address: { address: 0.0.0.0, port_value: ${l.port} }`,
     `  filter_chains:`,
@@ -193,7 +235,7 @@ function listenerBlock(name: string, l: BrokerListener, clusterOffset: number): 
     `                    name: envoy.http.injected_credentials.generic`,
     `                    typed_config:`,
     `                      '@type': type.googleapis.com/envoy.extensions.http.injected_credentials.generic.v3.Generic`,
-    `                      header_value_prefix: 'Bearer '`,
+    ...headerLines,
     `                      credential:`,
     `                        name: ${l.secret_name}`,
     `                        sds_config:`,
@@ -223,8 +265,8 @@ export function mergeEnvoy(
   yaml: string,
   preset: ConnectorPreset,
 ): { yaml: string; changed: boolean } {
-  const listener = preset.broker_listener;
-  if (preset.broker_routes.length === 0 && listener === undefined) {
+  const listeners = preset.broker_listeners ?? [];
+  if (preset.broker_routes.length === 0 && listeners.length === 0) {
     return { yaml, changed: false };
   }
   if (yaml.includes(marker(preset.name))) return { yaml, changed: false };
@@ -233,18 +275,20 @@ export function mergeEnvoy(
     out = insertAfterAnchor(out, VHOSTS_ANCHOR, vhostBlock(preset.name, route, i), 2);
     out = insertAfterAnchor(out, CLUSTERS_ANCHOR, clusterBlock(preset.name, route, i), 2);
   });
-  if (listener !== undefined) {
-    const offset = preset.broker_routes.length;
-    out = insertAfterAnchor(out, LISTENERS_ANCHOR, listenerBlock(preset.name, listener, offset), 2);
+  let clusterOffset = preset.broker_routes.length;
+  listeners.forEach((listener, li) => {
+    const lid = listener.id ?? (listeners.length > 1 ? String(li) : undefined);
+    out = insertAfterAnchor(out, LISTENERS_ANCHOR, listenerBlock(preset.name, listener, clusterOffset, lid), 2);
     listener.routes.forEach((route, i) => {
       out = insertAfterAnchor(
         out,
         CLUSTERS_ANCHOR,
-        clusterBlock(preset.name, route, offset + i),
+        clusterBlock(preset.name, route, clusterOffset + i),
         2,
       );
     });
-  }
+    clusterOffset += listener.routes.length;
+  });
   return { yaml: out, changed: true };
 }
 
@@ -255,14 +299,14 @@ function lineIndent(line: string): number {
 
 /** Удаляет все маркерные блоки пресета из envoy.yaml (vhost/cluster/listener). */
 export function removeConnectorBlocks(yaml: string, name: string): string {
-  const tags = [marker(name), listenerMarker(name)];
+  const tags = [marker(name), `${marker(name)} listener`];
   const lines = yaml.split('\n');
   const out: string[] = [];
   let i = 0;
   while (i < lines.length) {
     const line = lines[i]!;
     const trimmed = line.trimStart();
-    if (tags.some((t) => trimmed === t)) {
+    if (tags.some((t) => trimmed === t || trimmed.startsWith(`${t} `))) {
       const indent = lineIndent(line);
       i++;
       if (i < lines.length && lineIndent(lines[i]!) === indent && lines[i]!.trimStart().startsWith('- ')) {
@@ -275,7 +319,7 @@ export function removeConnectorBlocks(yaml: string, name: string): string {
           }
           const ind = lineIndent(cur);
           if (ind <= indent && cur.trimStart().startsWith('- ')) break;
-          if (ind <= indent && tags.some((t) => cur.trimStart() === t)) break;
+          if (ind <= indent && tags.some((t) => cur.trimStart() === t || cur.trimStart().startsWith(`${t} `))) break;
           i++;
         }
       }
@@ -335,13 +379,16 @@ export function upgradeConnector(root: string, preset: ConnectorPreset): Upgrade
     skillUpdated = skillDiff.length > 0;
   }
 
-  const totalRoutes = preset.broker_routes.length + (preset.broker_listener?.routes.length ?? 0);
-  if (totalRoutes > 0 && existsSync(paths.brokerEnvoy)) {
-    const before = readFileSync(paths.brokerEnvoy, 'utf8');
+  const totalRoutes =
+    preset.broker_routes.length +
+    (preset.broker_listeners ?? []).reduce((n, l) => n + l.routes.length, 0);
+  const envoyPath = resolveBrokerEnvoyPath(root);
+  if (totalRoutes > 0 && existsSync(envoyPath)) {
+    const before = readFileSync(envoyPath, 'utf8');
     const stripped = removeConnectorBlocks(before, preset.name);
     const merged = mergeEnvoy(stripped, preset);
     if (merged.yaml !== before) {
-      writeFileSync(paths.brokerEnvoy, merged.yaml, 'utf8');
+      writeFileSync(envoyPath, merged.yaml, 'utf8');
       routesUpdated = totalRoutes;
       envoyDiff = diffText(before, merged.yaml);
     }
@@ -374,12 +421,15 @@ export function applyConnector(root: string, preset: ConnectorPreset): ApplyResu
   }
 
   let routesAdded = 0;
-  const totalRoutes = preset.broker_routes.length + (preset.broker_listener?.routes.length ?? 0);
-  if (totalRoutes > 0 && existsSync(paths.brokerEnvoy)) {
-    const before = readFileSync(paths.brokerEnvoy, 'utf8');
+  const totalRoutes =
+    preset.broker_routes.length +
+    (preset.broker_listeners ?? []).reduce((n, l) => n + l.routes.length, 0);
+  const envoyPath = resolveBrokerEnvoyPath(root);
+  if (totalRoutes > 0 && existsSync(envoyPath)) {
+    const before = readFileSync(envoyPath, 'utf8');
     const merged = mergeEnvoy(before, preset);
     if (merged.changed) {
-      writeFileSync(paths.brokerEnvoy, merged.yaml, 'utf8');
+      writeFileSync(envoyPath, merged.yaml, 'utf8');
       routesAdded = totalRoutes;
     }
   }
@@ -395,11 +445,11 @@ export function applyConnector(root: string, preset: ConnectorPreset): ApplyResu
  * а между собой (чётность), ссылки cluster/cluster_name проверяются ниже.
  */
 export function checkEnvoyRoutes(yaml: string): { ok: boolean; detail: string } {
-  const matches = [...yaml.matchAll(/# connector:([a-z0-9-]+)( listener)?/g)];
+  const matches = [...yaml.matchAll(/# connector:([a-z0-9-]+)( listener(?: [a-z0-9-]+)?)?/g)];
   const names = new Set(matches.map((m) => m[1] ?? ''));
   const broken: string[] = [];
   for (const name of names) {
-    const hasListener = matches.some((m) => m[1] === name && m[2] === ' listener');
+    const hasListener = matches.some((m) => m[1] === name && m[2] !== undefined);
     const paired = matches.filter((m) => m[1] === name && m[2] === undefined).length;
     if (hasListener) {
       // Listener-only пресет (C4/C5): кластеры живут внутри listener-блока без парных
@@ -424,7 +474,8 @@ export function checkEnvoyRoutes(yaml: string): { ok: boolean; detail: string } 
 export function connectorStatus(root: string, name: string): 'installed' | 'available' {
   const paths = resolveInstallPaths(root);
   const skillInstalled = existsSync(join(root, 'skills', name, 'manifest.json'));
-  const envoy = existsSync(paths.brokerEnvoy) ? readFileSync(paths.brokerEnvoy, 'utf8') : '';
+  const envoyPath = resolveBrokerEnvoyPath(root);
+  const envoy = existsSync(envoyPath) ? readFileSync(envoyPath, 'utf8') : '';
   return skillInstalled || envoy.includes(marker(name)) ? 'installed' : 'available';
 }
 
@@ -495,6 +546,6 @@ export function runConnector(root: string, args: readonly string[]): number {
     );
     for (const h of result.hints) console.log(`  hint: ${h}`);
   }
-  console.log('\nNext: review deploy/broker/envoy.yaml, then restart the broker container.');
+  console.log('\nNext: review deploy/broker/envoy.yaml (or broker-remote in remote mode), then restart broker.');
   return 0;
 }

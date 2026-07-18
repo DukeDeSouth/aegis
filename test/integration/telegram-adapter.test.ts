@@ -249,14 +249,16 @@ describe('telegram adapter (e2e, DoD Sprint 2)', () => {
     expect(auditActions(w.auditDb)).toEqual(['channel.paired', 'pairing.denied']);
   });
 
-  it('outbound с не-telegram session_id уходит в dead, не в sendMessage', async () => {
+  it('outbound с не-telegram session_id возвращается в очередь', async () => {
     const w = makeWorld('foreign');
     w.queues.publish('outbound', JSON.stringify({ text: 'x', session_id: 's1' }), 'system');
 
     expect(await w.adapter.processOutbound()).toBe(true);
     expect(w.tg.sent).toHaveLength(0);
-    expect(auditActions(w.auditDb)).toEqual(['message.send_malformed']);
-    expect(w.queues.claim('outbound', 'probe')).toBeUndefined();
+    expect(auditActions(w.auditDb)).toEqual([]);
+    const next = w.queues.claim('outbound', 'probe');
+    expect(next?.payload).toContain('s1');
+    w.queues.ack(next!.id);
   });
 
   it('409 Conflict останавливает receiver (fail-closed) с записью в audit', async () => {

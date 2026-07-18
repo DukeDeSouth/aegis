@@ -55,6 +55,22 @@ describe('classifyUpdate (deny-by-default)', () => {
     expect(c).toEqual({ kind: 'untrusted', chatId: 10, reason: 'forwarded' });
   });
 
+  it('голосовое сообщение от владельца → owner_voice', () => {
+    const c = classifyUpdate(
+      update({
+        from: { id: OWNER },
+        chat: { id: 10 },
+        voice: { file_id: 'f', file_unique_id: 'u', duration: 5 },
+      }),
+      OWNER,
+    );
+    expect(c).toEqual({
+      kind: 'owner_voice',
+      chatId: 10,
+      voice: { file_id: 'f', file_unique_id: 'u', duration: 5 },
+    });
+  });
+
   it('не-текст от владельца (фото/стикер) → untrusted/non_text', () => {
     const c = classifyUpdate(update({ from: { id: OWNER }, chat: { id: 10 } }), OWNER);
     expect(c).toEqual({ kind: 'untrusted', chatId: 10, reason: 'non_text' });

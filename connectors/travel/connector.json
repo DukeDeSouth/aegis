@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "name": "travel",
+  "description": "Travel briefing from Gmail bookings + aviationstack flight status (C20)",
+  "skill": true,
+  "broker_routes": [],
+  "broker_listener": {
+    "port": 8087,
+    "secret_name": "travel_aviation_key",
+    "sds_path": "/etc/broker/travel/secret.yaml",
+    "header_value_prefix": "",
+    "routes": [
+      {
+        "host": "travel.local",
+        "cluster_address": "127.0.0.1",
+        "cluster_port": 8787,
+        "tls": false
+      }
+    ]
+  },
+  "config_hints": [
+    "requires google connector (C1) with gmail_travel_fetch tool in mcp.servers",
+    "aviationstack API key → deploy/broker/travel/api-key.txt (0600); start travel-proxy per deploy/broker/travel/README.md",
+    "daily ingest cron: { \"id\": \"travel-ingest\", \"cron\": \"08:30\", \"text\": \"/travel-ingest\", \"session_id\": \"tg:YOUR_CHAT_ID\" }",
+    "pre-flight brief cron (customize date): { \"id\": \"travel-brief\", \"cron\": \"18:00\", \"text\": \"/travel-brief\", \"session_id\": \"tg:YOUR_CHAT_ID\" }"
+  ]
+}
