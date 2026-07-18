@@ -2011,10 +2011,21 @@ export class Orchestrator {
       return;
     }
 
+    if (provenance !== 'owner') {
+      this.audit.append({
+        actor: ACTOR,
+        action: 'knowledge.denied',
+        decision: 'deny',
+        payload: { messageId, reason: 'owner_only', queueProvenance: provenance },
+      });
+      this.queues.ack(messageId);
+      return;
+    }
+
     const id = this.knowledge.insert({
       title,
       body,
-      provenance: 'owner',
+      provenance: queueToMemoryProvenance(provenance),
       epistemicStatus: 'unverified',
     });
     this.audit.append({
@@ -2548,6 +2559,8 @@ export class Orchestrator {
   /**
    * Карантинный ход: Q-LLM → P-LLM. Same-turn: без sandbox/irreversible.
    * Gate для llm/send — owner (владелец инициировал forward); данные помечены quarantine.
+   * FIX-1b: захардкоженный 'owner' в canSpend/gate — intentional: forward инициирует владелец,
+   * недоверенным является только content (queueProvenance может быть quarantine).
    */
   private async handleQuarantineTurn(
     messageId: number,

@@ -119,4 +119,19 @@ describe('ChannelState', () => {
     expect(state.getSlackOwnerUserId()).toBe('UOWNER');
     expect(() => state.setSlackOwnerUserId('UOTHER')).toThrow(/already paired/);
   });
+
+  it('Sprint 41: webchat pairing lockout keys persist', () => {
+    const db = makeDb('pair-lock.db', true);
+    applyMigration(db, migration('0010-queue.sql'), 10);
+    applyMigration(db, migration('0014-queue.sql'), 14);
+    const state = new ChannelState(db);
+    state.setWebchatPairFailCount(3);
+    state.setWebchatPairLockoutUntil(Date.now() + 60_000);
+    state.setWebchatPairLockoutStrikes(2);
+
+    const reopened = new ChannelState(db);
+    expect(reopened.getWebchatPairFailCount()).toBe(3);
+    expect(reopened.getWebchatPairLockoutStrikes()).toBe(2);
+    expect(reopened.getWebchatPairLockoutUntil()).toBeGreaterThan(Date.now());
+  });
 });

@@ -48,8 +48,26 @@
 
 Скомпрометированная/обманутая сессия записывает вредное знание/навык, будущие сессии грузят как доверенное.
 
-- **Митигация:** знание рождается `unverified` с provenance; в системный контекст только через promotion-гейт (corroborated/verified); provenance «карантин/фон» понижает доверие; snapshot/rollback (LEARNING_LOOP).
+- **Митигация:** знание рождается `unverified` с provenance; в системный контекст только через promotion-гейт (corroborated/verified); provenance «карантин/фон» понижает доверие; snapshot/rollback (LEARNING_LOOP). Команды записи памяти (`/remember`) — **owner_only** (Sprint 41): scheduler/cron не может подменить provenance на `owner`.
 - **Остаточный риск:** отравление слоя доказательств (evidence) — evidence тоже несёт provenance и не самоподтверждается из карантина.
+
+### V8. Компрометация `aegis.config.json` / cron-хинтов
+
+Атакующий с правом записи конфига (или подмена через backup/CI) вставляет вредоносный `schedules[].text`.
+
+- **Что доступно scheduler-провенансу через gate:** обратимые действия — `sandbox.run`, `file.write` (workspace), `message.send`, `llm.invoke`; фоновые read-only (`/search`). **Недоступно:** `/remember`, `/corroborate`, `/verify`, irreversible без human-gate, promotion owner-команд.
+- **Митигация:** gate engine разделяет `TRUSTED_FOR_EFFECT` (owner) и `TRUSTED_FOR_BACKGROUND` (scheduler); критичные команды проверяют `provenance === 'owner'` до side-effect; audit `knowledge.denied` / `promotion.denied`.
+- **Рекомендации владельцу:** `chmod 0600 aegis.config.json`; review cron-хинтов в dashboard; не хранить конфиг в world-readable volume; отдельный пользователь ОС для процесса агента.
+- **Остаточный риск:** легитимный cron с вредоносным текстом всё ещё может тратить токены и писать в workspace — budget engine + мониторинг audit.
+
+### V9. Brute-force pairing / поверхность WebChat
+
+Перебор pairing-кода на `POST /api/pair` или XSS через отсутствие CSP.
+
+- **Митигация (pairing):** счётчик неудач в `channel_state`, lockout после 5 fails, экспоненциальный backoff 60s→15m, audit `pairing.lockout`, 429 до истечения lockout (без `timingSafeEqual` — защита от timing oracle при lockout). Sprint 41.
+- **Митигация (CSP):** `Content-Security-Policy`, `X-Content-Type-Options`, `Referrer-Policy` на всех ответах WebChat.
+- **Связь с V6:** 2FA на irreversible (`gate.second_factor`) — отдельный контур; pairing lockout закрывает offline перебор кода до захвата сессии.
+- **Остаточный риск:** физический доступ к экрану с pairing-кодом; слабый код владельца — рекомендация ≥16 символов из env.
 
 ### V5. Вредоносный навык/supply-chain
 
@@ -62,7 +80,7 @@ Payload в навыке или зависимости.
 
 Атакующий пишет агенту как владелец.
 
-- **Митигация:** провенанс + для необратимых действий — out-of-band 2FA (`gate.second_factor`: cross-channel TG↔Discord и/или TOTP; дефолт выключен); security-контур V9.
+- **Митигация:** провенанс + для необратимых действий — out-of-band 2FA (`gate.second_factor`: cross-channel TG↔Discord и/или TOTP; дефолт выключен); security-контур V9 (2FA + pairing lockout).
 - **Остаточный риск:** при одном paired-канале и без TOTP — только human-gate `/approve` в том же канале (как Sprint 4–26).
 
 ### V7. DoS/перерасход токенов
@@ -79,6 +97,8 @@ Payload в навыке или зависимости.
 | V1 prompt injection       | высокая     | высокий | 🔴        |
 | V2 эксфильтрация секретов | средняя     | высокий | 🔴        |
 | V4 self-poisoning         | средняя     | высокий | 🔴        |
+| V8 config/cron compromise | низкая      | высокий | 🟡        |
+| V9 WebChat pairing/CSP    | средняя     | средний | 🟡        |
 | V3 sandbox escape         | низкая      | высокий | 🟡        |
 | V5 вредоносный навык      | средняя     | средний | 🟡        |
 | V6 захват аккаунта        | низкая      | высокий | 🟡        |

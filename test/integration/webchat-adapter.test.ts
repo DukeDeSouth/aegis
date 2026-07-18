@@ -30,6 +30,13 @@ function migration(name: string): string {
   return readFileSync(new URL(`../../migrations/${name}`, import.meta.url), 'utf8');
 }
 
+function applyQueueMigrations(db: ReturnType<typeof openDb>): void {
+  applyMigration(db, migration('0001-queue.sql'), 1);
+  applyMigration(db, migration('0002-queue.sql'), 2);
+  applyMigration(db, migration('0010-queue.sql'), 10);
+  applyMigration(db, migration('0014-queue.sql'), 14);
+}
+
 function staticRoot(): string {
   const dir = join(tmp, `static-${Date.now()}`);
   mkdirSync(dir, { recursive: true });
@@ -44,9 +51,7 @@ async function waitReady(ms = 80): Promise<void> {
 describe('webchat adapter (Sprint 29)', () => {
   it('pairing then message → inbound owner', async () => {
     const queueDb = openDb(join(tmp, 'wc-q.db'));
-    applyMigration(queueDb, migration('0001-queue.sql'), 1);
-    applyMigration(queueDb, migration('0002-queue.sql'), 2);
-    applyMigration(queueDb, migration('0010-queue.sql'), 10);
+    applyQueueMigrations(queueDb);
     const queues = new QueueStore(queueDb);
     const auditDb = openDb(join(tmp, 'wc-a.db'));
     applyMigration(auditDb, migration('0001-audit.sql'), 1);
@@ -101,9 +106,7 @@ describe('webchat adapter (Sprint 29)', () => {
 
   it('unpaired message denied', async () => {
     const queueDb = openDb(join(tmp, 'wc2-q.db'));
-    applyMigration(queueDb, migration('0001-queue.sql'), 1);
-    applyMigration(queueDb, migration('0002-queue.sql'), 2);
-    applyMigration(queueDb, migration('0010-queue.sql'), 10);
+    applyQueueMigrations(queueDb);
     const queues = new QueueStore(queueDb);
     const auditDb = openDb(join(tmp, 'wc2-a.db'));
     applyMigration(auditDb, migration('0001-audit.sql'), 1);
@@ -133,9 +136,7 @@ describe('webchat adapter (Sprint 29)', () => {
 
   it('already paired: same code reauth → new session cookie', async () => {
     const queueDb = openDb(join(tmp, 'wc3-q.db'));
-    applyMigration(queueDb, migration('0001-queue.sql'), 1);
-    applyMigration(queueDb, migration('0002-queue.sql'), 2);
-    applyMigration(queueDb, migration('0010-queue.sql'), 10);
+    applyQueueMigrations(queueDb);
     const queues = new QueueStore(queueDb);
     const auditDb = openDb(join(tmp, 'wc3-a.db'));
     applyMigration(auditDb, migration('0001-audit.sql'), 1);
@@ -175,9 +176,7 @@ describe('webchat adapter (Sprint 29)', () => {
 
   it('telegram adapter releases webchat outbound for webchat sender', async () => {
     const queueDb = openDb(join(tmp, 'wc4-q.db'));
-    applyMigration(queueDb, migration('0001-queue.sql'), 1);
-    applyMigration(queueDb, migration('0002-queue.sql'), 2);
-    applyMigration(queueDb, migration('0010-queue.sql'), 10);
+    applyQueueMigrations(queueDb);
     const queues = new QueueStore(queueDb);
     const auditDb = openDb(join(tmp, 'wc4-a.db'));
     applyMigration(auditDb, migration('0001-audit.sql'), 1);
@@ -231,9 +230,7 @@ describe('webchat adapter (Sprint 29)', () => {
 
   it('GET /api/actions returns skills and commands when authed', async () => {
     const queueDb = openDb(join(tmp, 'wc5-q.db'));
-    applyMigration(queueDb, migration('0001-queue.sql'), 1);
-    applyMigration(queueDb, migration('0002-queue.sql'), 2);
-    applyMigration(queueDb, migration('0010-queue.sql'), 10);
+    applyQueueMigrations(queueDb);
     const queues = new QueueStore(queueDb);
     const auditDb = openDb(join(tmp, 'wc5-a.db'));
     applyMigration(auditDb, migration('0001-audit.sql'), 1);
@@ -274,9 +271,7 @@ describe('webchat adapter (Sprint 29)', () => {
 
   it('GET /api/history returns authed episode tail', async () => {
     const queueDb = openDb(join(tmp, 'wc6-q.db'));
-    applyMigration(queueDb, migration('0001-queue.sql'), 1);
-    applyMigration(queueDb, migration('0002-queue.sql'), 2);
-    applyMigration(queueDb, migration('0010-queue.sql'), 10);
+    applyQueueMigrations(queueDb);
     const queues = new QueueStore(queueDb);
     const auditDb = openDb(join(tmp, 'wc6-a.db'));
     applyMigration(auditDb, migration('0001-audit.sql'), 1);
@@ -323,9 +318,7 @@ describe('webchat adapter (Sprint 29)', () => {
 
   it('outbound delivered after aborted poll (stale waiter regression)', async () => {
     const queueDb = openDb(join(tmp, 'wc7-q.db'));
-    applyMigration(queueDb, migration('0001-queue.sql'), 1);
-    applyMigration(queueDb, migration('0002-queue.sql'), 2);
-    applyMigration(queueDb, migration('0010-queue.sql'), 10);
+    applyQueueMigrations(queueDb);
     const queues = new QueueStore(queueDb);
     const auditDb = openDb(join(tmp, 'wc7-a.db'));
     applyMigration(auditDb, migration('0001-audit.sql'), 1);
@@ -373,5 +366,109 @@ describe('webchat adapter (Sprint 29)', () => {
 
     ac.abort();
     await run;
+  });
+
+  it('Sprint 41: CSP headers on API and static', async () => {
+    const queueDb = openDb(join(tmp, 'wc-csp-q.db'));
+    applyQueueMigrations(queueDb);
+    const queues = new QueueStore(queueDb);
+    const auditDb = openDb(join(tmp, 'wc-csp-a.db'));
+    applyMigration(auditDb, migration('0001-audit.sql'), 1);
+    const audit = new AuditLog(auditDb);
+    const state = new ChannelState(queueDb);
+    const staticDir = staticRoot();
+    const adapter = new WebChatAdapter(queues, audit, state, CODE_REF, {
+      port: PORT + 7,
+      staticRoot: staticDir,
+      pollMs: 1,
+    });
+
+    const ac = new AbortController();
+    const run = adapter.run(ac.signal);
+    await waitReady();
+
+    const base = `http://127.0.0.1:${PORT + 7}`;
+    const statusRes = await fetch(`${base}/api/status`);
+    expect(statusRes.headers.get('content-security-policy')).toContain("default-src 'self'");
+    expect(statusRes.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(statusRes.headers.get('referrer-policy')).toBe('no-referrer');
+
+    const staticRes = await fetch(`${base}/`);
+    expect(staticRes.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
+
+    ac.abort();
+    await run;
+  });
+
+  it('Sprint 41: pairing brute-force lockout after 5 fails, persists across restart', async () => {
+    const queueDb = openDb(join(tmp, 'wc-lock-q.db'));
+    applyQueueMigrations(queueDb);
+    const queues = new QueueStore(queueDb);
+    const auditDb = openDb(join(tmp, 'wc-lock-a.db'));
+    applyMigration(auditDb, migration('0001-audit.sql'), 1);
+    const audit = new AuditLog(auditDb);
+    const state = new ChannelState(queueDb);
+    const adapter = new WebChatAdapter(queues, audit, state, CODE_REF, {
+      port: PORT + 8,
+      staticRoot: staticRoot(),
+      pollMs: 1,
+    });
+
+    const ac = new AbortController();
+    const run = adapter.run(ac.signal);
+    await waitReady();
+
+    const base = `http://127.0.0.1:${PORT + 8}`;
+    for (let i = 0; i < 4; i++) {
+      const res = await fetch(`${base}/api/pair`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: 'wrong-code' }),
+      });
+      expect(res.status).toBe(403);
+    }
+    const fifth = await fetch(`${base}/api/pair`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: 'wrong-code' }),
+    });
+    expect(fifth.status).toBe(429);
+
+    for (let i = 0; i < 95; i++) {
+      const res = await fetch(`${base}/api/pair`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: 'wrong-code' }),
+      });
+      expect(res.status).toBe(429);
+    }
+
+    ac.abort();
+    await run;
+
+    const auditRows = auditDb
+      .prepare(`SELECT action FROM audit_log WHERE action = 'pairing.lockout'`)
+      .all() as { action: string }[];
+    expect(auditRows.length).toBeGreaterThanOrEqual(1);
+
+    const reopened = new ChannelState(queueDb);
+    expect(reopened.getWebchatPairLockoutUntil()).toBeGreaterThan(Date.now());
+
+    const adapter2 = new WebChatAdapter(queues, audit, reopened, CODE_REF, {
+      port: PORT + 9,
+      staticRoot: staticRoot(),
+      pollMs: 1,
+    });
+    const ac2 = new AbortController();
+    const run2 = adapter2.run(ac2.signal);
+    await waitReady();
+    const lockedRes = await fetch(`http://127.0.0.1:${PORT + 9}/api/pair`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: 'wrong-code' }),
+    });
+    expect(lockedRes.status).toBe(429);
+    ac2.abort();
+    await run2;
   });
 });

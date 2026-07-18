@@ -19,10 +19,26 @@ import { classifyWebchatText } from './policy.ts';
 import type { WebchatOutbox } from './outbox.ts';
 import { buildWebchatActions } from './actions.ts';
 import { clampHistoryLimit, episodesToHistoryMessages, type WebchatHistoryMessage } from './history.ts';
+import {
+  clearPairingLockout,
+  isPairingLockedOut,
+  recordPairingFailure,
+} from './pairing-lockout.ts';
 import type { SkillSummary } from '../../../skills/types.ts';
 
 const ACTOR = 'webchat-adapter';
 const POLL_TIMEOUT_MS = 25_000;
+
+const SECURITY_HEADERS: Record<string, string> = {
+  'Content-Security-Policy':
+    "default-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'",
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'no-referrer',
+};
+
+function applySecurityHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  return { ...SECURITY_HEADERS, ...extra };
+}
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -66,13 +82,16 @@ function readJsonBody(req: IncomingMessage): Promise<unknown> {
 }
 
 function json(res: ServerResponse, status: number, body: unknown): void {
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.writeHead(status, applySecurityHeaders({ 'Content-Type': 'application/json; charset=utf-8' }));
   res.end(JSON.stringify(body));
 }
 
 function deny(res: ServerResponse, status: number): void {
-  res.writeHead(status, { 'Content-Type': 'text/plain' });
-  res.end(status === 401 ? 'Unauthorized' : 'Forbidden');
+  res.writeHead(
+    status,
+    applySecurityHeaders({ 'Content-Type': 'text/plain; charset=utf-8' }),
+  );
+  res.end(status === 401 ? 'Unauthorized' : status === 429 ? 'Too Many Requests' : 'Forbidden');
 }
 
 export function createWebchatServer(deps: WebchatServerDeps): Server {
@@ -81,7 +100,7 @@ export function createWebchatServer(deps: WebchatServerDeps): Server {
   return createHttpServer((req, res) => {
     void handle(req, res).catch(() => {
       if (!res.headersSent) {
-        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.writeHead(500, applySecurityHeaders({ 'Content-Type': 'text/plain; charset=utf-8' }));
         res.end('error');
       }
     });
@@ -110,13 +129,25 @@ export function createWebchatServer(deps: WebchatServerDeps): Server {
     }
 
     if (method === 'POST' && path === '/api/pair') {
+      if (isPairingLockedOut(deps.state)) {
+        deps.audit.append({
+          actor: ACTOR,
+          action: 'pairing.failed',
+          decision: 'deny',
+          payload: { reason: 'lockout' },
+        });
+        deny(res, 429);
+        return;
+      }
       const body = (await readJsonBody(req)) as { code?: string };
       const code = typeof body.code === 'string' ? body.code : '';
       if (!pairingCodeMatches(code)) {
+        recordPairingFailure(deps.state, deps.audit, ACTOR);
         deps.audit.append({ actor: ACTOR, action: 'pairing.failed', decision: 'deny', payload: {} });
-        deny(res, 403);
+        deny(res, isPairingLockedOut(deps.state) ? 429 : 403);
         return;
       }
+      clearPairingLockout(deps.state);
       const token = generateSessionToken();
       const alreadyPaired = deps.state.isWebchatPaired();
       if (alreadyPaired) {
@@ -137,10 +168,13 @@ export function createWebchatServer(deps: WebchatServerDeps): Server {
           payload: { channel: 'webchat' },
         });
       }
-      res.writeHead(200, {
-        'Content-Type': 'application/json; charset=utf-8',
-        'Set-Cookie': formatSetCookie(token),
-      });
+      res.writeHead(
+        200,
+        applySecurityHeaders({
+          'Content-Type': 'application/json; charset=utf-8',
+          'Set-Cookie': formatSetCookie(token),
+        }),
+      );
       res.end(JSON.stringify({ ok: true, reauth: alreadyPaired }));
       return;
     }
@@ -222,23 +256,18 @@ export function createWebchatServer(deps: WebchatServerDeps): Server {
       const filePath = resolve(deps.staticRoot, rel);
       const rootResolved = resolve(deps.staticRoot);
       if (!filePath.startsWith(rootResolved) || !existsSync(filePath)) {
-        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.writeHead(404, applySecurityHeaders({ 'Content-Type': 'text/plain; charset=utf-8' }));
         res.end('Not found');
         return;
       }
       const ext = extname(filePath);
       const type = MIME[ext] ?? 'application/octet-stream';
-      res.writeHead(200, {
-        'Content-Type': type,
-        'X-Content-Type-Options': 'nosniff',
-        'X-Frame-Options': 'DENY',
-        'Referrer-Policy': 'no-referrer',
-      });
+      res.writeHead(200, applySecurityHeaders({ 'Content-Type': type }));
       res.end(readFileSync(filePath));
       return;
     }
 
-    res.writeHead(405, { 'Content-Type': 'text/plain' });
+    res.writeHead(405, applySecurityHeaders({ 'Content-Type': 'text/plain; charset=utf-8' }));
     res.end('Method not allowed');
   }
 }

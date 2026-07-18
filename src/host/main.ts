@@ -110,6 +110,7 @@ async function main(): Promise<void> {
   applyMigration(queueDb, migrationSql('0011-queue.sql'), 11);
   applyMigration(queueDb, migrationSql('0012-queue.sql'), 12);
   applyMigration(queueDb, migrationSql('0013-queue.sql'), 13);
+  applyMigration(queueDb, migrationSql('0014-queue.sql'), 14);
   applyMigration(memoryDb, migrationSql('0001-memory.sql'), 1);
   applyMigration(memoryDb, migrationSql('0002-memory.sql'), 2);
   applyMigration(memoryDb, migrationSql('0006-memory.sql'), 6);

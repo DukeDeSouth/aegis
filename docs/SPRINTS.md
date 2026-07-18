@@ -709,6 +709,26 @@
 
 ---
 
+## Sprint 41 — Фиксы внешнего тестирования: provenance `/remember`, brute-force pairing, CSP
+
+**Статус:** **done** (2026-07-18).
+
+**Цель:** закрыть находки внешних тестеров (2026-07-18). Три подтверждённых проблемы + документирование сценария «компрометация конфига». Находки «отсутствующие файлы/миграции/коннекторы» **не подтверждены** — всё существует локально и в `origin/main`; см. [`SECURITY_TESTER_RESPONSE.md`](SECURITY_TESTER_RESPONSE.md).
+
+**Спека:** `THREAT_MODEL.md` (V4, V8, V9) | находки тестеров 2026-07-18 | **M7:** [`m7-cycles/sprint-41-фиксы-внешнего-тестирования-provenance-remember-pairing-csp/`](../m7-cycles/sprint-41-фиксы-внешнего-тестирования-provenance-remember-pairing-csp/) (`cycle_sprint-41-external-test-_781806`)
+
+- [x] **FIX-1 (ядро, V4-adjacent):** `/remember` — deny при `provenance !== 'owner'`; фактический provenance в `insert` (M)
+- [x] **FIX-1b sweep:** таблица команд в IMPLEMENTATION_REPORT; комментарий `handleQuarantineTurn` (M)
+- [x] **FIX-2 (webchat):** rate-limit `POST /api/pair` — 5 fails → lockout, backoff 60s→15m, audit `pairing.lockout` (M)
+- [x] **FIX-3 (webchat):** CSP + security headers на все ответы (S)
+- [x] **DOC:** THREAT_MODEL V8 (config/cron), V9 (pairing/CSP) (S)
+- [x] **DOC:** `SECURITY_TESTER_RESPONSE.md` — false-positives (S)
+- [x] Тесты: V4-расширение, pairing lockout, CSP headers (M)
+
+**DoD:** cron `/remember` отклоняется с audit-записью; brute-force блокируется; CSP на всех ответах WebChat; THREAT_MODEL описывает config-компрометацию; LOC в пределах 11200.
+
+---
+
 ## После MVP (бэклог)
 
 Спринты 17+ — см. [`POST_MVP_FEATURES.md`](POST_MVP_FEATURES.md) (F7–F11). **Полный список кандидатов — [`BACKLOG.md`](BACKLOG.md)**; C13–C19, U1/U3/U4, L3, S4/S5 нарезаны в спринты 32–35; U2/C20/S3, L1/L2, S1 — варианты Sprint 36 (см. выше). Остаток без спринта:
@@ -756,6 +776,10 @@
 | 34     | Быт: C17 медиатека, C18 закладки, PWA, дашборд  | быт закрыт |
 | 35     | Зрелость: L3 автокомпозиции, backup, health     | операционная зрелость |
 | 36     | Вариант A: U2 TTS, C20 travel, S3 dual-vendor     | быстрые победы — **done** |
-| 37     | L1 LLM-консолидация памяти                        | дифференциатор — **в работе** |
+| 37     | L1 LLM-консолидация памяти                        | дифференциатор — **done** |
+| 38     | L2 суб-агенты `/research-deep`                    | дифференциатор — **done** |
+| 39     | S1 remote broker (mTLS, два хоста)                | security — **done** |
+| 40     | S2 gVisor sandbox runtime                         | V3 hardening — **done** |
+| 41     | Фиксы тестирования: provenance `/remember`, pairing rate-limit, CSP | **security-фиксы** |
 
 Ориентир: ~10 спринтов ≈ 20 недель до MVP для команды 1–3 человека. Оценки уточняются после Sprint 0.

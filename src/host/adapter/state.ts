@@ -120,6 +120,37 @@ export class ChannelState {
       .run(`voice_reply:${sessionId}`, enabled ? '1' : '0');
   }
 
+  getWebchatPairFailCount(): number {
+    return this.readNumber('webchat_pair_fail_count') ?? 0;
+  }
+
+  setWebchatPairFailCount(count: number): void {
+    this.writeReplace('webchat_pair_fail_count', String(count));
+  }
+
+  getWebchatPairLockoutUntil(): number | undefined {
+    const n = this.readNumber('webchat_pair_lockout_until');
+    return n === 0 ? undefined : n;
+  }
+
+  setWebchatPairLockoutUntil(untilMs: number): void {
+    this.writeReplace('webchat_pair_lockout_until', String(untilMs));
+  }
+
+  getWebchatPairLockoutStrikes(): number {
+    return this.readNumber('webchat_pair_lockout_strikes') ?? 0;
+  }
+
+  setWebchatPairLockoutStrikes(strikes: number): void {
+    this.writeReplace('webchat_pair_lockout_strikes', String(strikes));
+  }
+
+  private writeReplace(key: string, value: string): void {
+    this.db
+      .prepare(`INSERT OR REPLACE INTO channel_state (key, value) VALUES (?, ?)`)
+      .run(key, value);
+  }
+
   private writeOnce(key: string, value: string): void {
     if (this.readString(key) !== undefined) {
       throw new Error(`channel already paired: ${key} is write-once`);

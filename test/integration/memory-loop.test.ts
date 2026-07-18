@@ -127,6 +127,40 @@ describe('memory loop (e2e, DoD Sprint 5)', () => {
     expect(row.title).toBe('API');
   });
 
+  it('scheduler /remember → deny, knowledge не создаётся (Sprint 41)', async () => {
+    const w = makeWorld('remember-sched');
+    w.queues.publish(
+      'inbound',
+      JSON.stringify({ text: '/remember evil | payload', session_id: 'sched:1' }),
+      'scheduler',
+    );
+    const orch = makeOrchestrator(w, {
+      complete: () => Promise.reject(new Error('no llm')),
+    });
+    expect(await orch.processOne()).toBe(true);
+    expect(w.memoryDb.prepare('SELECT COUNT(*) AS c FROM knowledge').get() as { c: number }).toEqual({
+      c: 0,
+    });
+    expect(auditActions(w.auditDb)).toContain('knowledge.denied');
+  });
+
+  it('quarantine /remember → deny', async () => {
+    const w = makeWorld('remember-q');
+    w.queues.publish(
+      'inbound',
+      JSON.stringify({ text: '/remember evil | payload', session_id: 'tg:99' }),
+      'quarantine',
+    );
+    const orch = makeOrchestrator(w, {
+      complete: () => Promise.reject(new Error('no llm')),
+    });
+    expect(await orch.processOne()).toBe(true);
+    expect(w.memoryDb.prepare('SELECT COUNT(*) AS c FROM knowledge').get() as { c: number }).toEqual({
+      c: 0,
+    });
+    expect(auditActions(w.auditDb)).toContain('knowledge.denied');
+  });
+
   it('corroborated knowledge инжектируется в system prompt', async () => {
     const w = makeWorld('inject');
     const id = w.knowledge.insert({ title: 'Fact', body: 'secret-value', provenance: 'owner' });
